@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Spreadsheet file icon: page with grid -->
+  <!-- Use a consistent purple stroke/fill instead of currentColor so it displays properly when loaded via <img>. -->
+  <path d="M6 2h8l6 6v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="none" stroke="#667eea" stroke-width="2"/>
+  <path d="M14 2v6h6" fill="none" stroke="#667eea" stroke-width="2"/>
+  <rect x="8" y="13" width="2" height="2" fill="#667eea"/>
+  <rect x="11" y="13" width="2" height="2" fill="#667eea"/>
+  <rect x="14" y="13" width="2" height="2" fill="#667eea"/>
+  <rect x="8" y="16" width="2" height="2" fill="#667eea"/>
+  <rect x="11" y="16" width="2" height="2" fill="#667eea"/>
+  <rect x="14" y="16" width="2" height="2" fill="#667eea"/>
+</svg>

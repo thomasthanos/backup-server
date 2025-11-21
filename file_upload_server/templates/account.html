@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account - File Upload Server</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="dashboard">
+    <nav class="navbar">
+        <div class="navbar-brand">📁 File Server</div>
+        <div class="navbar-menu">
+            <a href="{{ url_for('dashboard') }}">Dashboard</a>
+            <a href="{{ url_for('account') }}">Account</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="dashboard-header">
+            <h1>👤 Account Settings</h1>
+            <p>Manage your profile and view statistics</p>
+        </div>
+
+        <div class="files-section">
+            <h2>Profile Information</h2>
+            
+            <div class="account-grid">
+                <div class="info-card">
+                    <h3>📧 Email</h3>
+                    <p>{{ email }}</p>
+                </div>
+
+                <div class="info-card">
+                    <h3>👤 Name</h3>
+                    <p>{{ user.name or 'Not set' }}</p>
+                </div>
+
+                <div class="info-card">
+                    <h3>📅 Member Since</h3>
+                    <p>{{ user.created.split(' ')[0] if user.created else 'N/A' }}</p>
+                </div>
+            </div>
+
+            <h2 style="margin-top: 40px;">📊 Statistics</h2>
+            
+            <div class="account-grid">
+                <div class="info-card">
+                    <h3>📁 Total Folders</h3>
+                    <div class="value">{{ folder_count }}</div>
+                </div>
+
+                <div class="info-card">
+                    <h3>📎 Total Files</h3>
+                    <div class="value">{{ file_count }}</div>
+                </div>
+
+                <div class="info-card">
+                    <h3>💾 Storage Used</h3>
+                    <div class="value">{{ (total_size / 1024 / 1024) | round(2) }} MB</div>
+                </div>
+
+                <div class="info-card">
+                    <h3>📈 Average File Size</h3>
+                    <div class="value">
+                        {% if file_count > 0 %}
+                            {{ ((total_size / file_count) / 1024 / 1024) | round(2) }} MB
+                        {% else %}
+                            0 MB
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top: 40px; text-align: center;">
+                <a href="{{ url_for('logout') }}" class="btn btn-danger">
+                    🚪 Logout
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

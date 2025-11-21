@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify Email</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card" style="text-align: center;">
+            <div class="empty-state-icon" style="font-size: 100px; margin-bottom: 30px;">📧</div>
+            <h1 style="margin-bottom: 20px;">Verify Your Email</h1>
+            <p style="color: var(--gray); margin-bottom: 30px; line-height: 1.6;">
+                We've sent a verification email to your address.<br>
+                Please check your inbox and click the verification link.
+            </p>
+            <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+                Continue to Dashboard
+            </a>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

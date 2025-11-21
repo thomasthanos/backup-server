@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Executable file icon: page with gear -->
+  <!-- Use a consistent purple stroke/fill instead of currentColor so it displays properly when loaded via <img>. -->
+  <path d="M6 2h8l6 6v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="none" stroke="#667eea" stroke-width="2"/>
+  <path d="M14 2v6h6" fill="none" stroke="#667eea" stroke-width="2"/>
+  <circle cx="12" cy="16" r="2" fill="#667eea"/>
+  <path d="M12 12.5v1M12 18.5v1M9.96 13.54l.7.7M15.34 17.92l.7.7M9.96 18.46l.7-.7M15.34 14.08l.7-.7" stroke="#667eea" stroke-width="2" stroke-linecap="round"/>
+</svg>

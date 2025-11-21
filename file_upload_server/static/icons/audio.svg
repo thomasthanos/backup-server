@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <!-- Audio file icon: outline with music note -->
+  <!-- Use a consistent purple stroke/fill instead of currentColor so it displays properly when loaded via <img>. -->
+  <rect x="3" y="4" width="18" height="16" rx="2" ry="2" fill="none" stroke="#667eea" stroke-width="2"/>
+  <path d="M10 9v5a2 2 0 1 0 2 2V11h4V9h-6z" fill="#667eea"/>
+</svg>
