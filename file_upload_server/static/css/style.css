@@ -11,7 +11,7 @@
     --glass-shadow: rgba(0, 0, 0, 0.3);
     
     /* Accent Colors */
-    --primary: #667eea;
+    --primary: #66c7ea;
     --primary-glow: rgba(102, 126, 234, 0.3);
     --secondary: #764ba2;
     --accent: #f093fb;
@@ -27,8 +27,8 @@
     --text-muted: #64748b;
     
     /* Interactive */
-    --hover-bg: rgba(102, 126, 234, 0.1);
-    --active-bg: rgba(102, 126, 234, 0.2);
+    --hover-bg: rgba(102, 170, 234, 0.1);
+    --active-bg: rgba(85, 147, 197, 0.2);
 
     /* Plyr main color to match our primary accent */
     --plyr-color-main: var(--primary);
@@ -720,7 +720,7 @@ body {
     justify-content: center;
     align-items: center;
     /* Limit the card width and center it within the container */
-    max-width: 900px;
+    max-width: 1600px;
     width: 90%;
     margin: 0 auto;
 }
@@ -811,7 +811,29 @@ body {
     border-radius: 12px !important;
     overflow: hidden;
 }
-
+.plyr {
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-font-smoothing: antialiased;
+    align-items: center;
+    direction: ltr;
+    display: flex;
+    flex-direction: column;
+    font-family: inherit;
+    font-family: var(--plyr-font-family, inherit);
+    font-variant-numeric: tabular-nums;
+    font-weight: 400;
+    font-weight: var(--plyr-font-weight-regular, 400);
+    line-height: 1.7;
+    line-height: var(--plyr-line-height, 1.7);
+    max-width: 100%;
+    min-width: 200px;
+    position: relative;
+    text-shadow: none;
+    transition: box-shadow .3s ease;
+    z-index: 0;
+    border-radius: 15px;
+    box-shadow: #a9a9a942 0px 0px 10px;
+}
 /* Specific styling for progress and volume sliders */
 .video-controls input[type="range"].progress-range {
     flex: 1;
@@ -1181,4 +1203,32 @@ body {
 .btn-delete:hover {
     background: linear-gradient(135deg, var(--danger), #b91c1c);
     filter: brightness(1.1);
+}
+
+/* File names that are links should inherit text color and show an underline on hover */
+.file-link {
+    color: var(--text-primary);
+    text-decoration: none;
+}
+.file-link:hover {
+    text-decoration: underline;
+    color: var(--primary);
+}
+.plyr__menu__container [role=menu]{
+    background: rgb(173, 173, 173);
+    border-radius: 8px;
+}
+.plyr__menu__container:after{
+    border-top-color: rgb(173, 173, 173);
+}
+
+.plyr__menu__container .plyr__control>span{
+    color: black;
+    font-weight: 700;
+}
+.plyr__menu__container .plyr__control--forward:after{
+    border-left-color: #000000;
+}
+.plyr--video .plyr__control:focus-visible, .plyr--video .plyr__control:hover, .plyr--video .plyr__control[aria-expanded=true]{
+        background: #5b5b5b;
 }

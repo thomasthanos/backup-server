@@ -12,11 +12,7 @@ import logging
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-# app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
-# Upload size limit removed: the above line is commented out to allow
-# uploads of arbitrary size.  Be cautious when deploying in production
-# environments, as unrestricted upload sizes may impact server or
-# reverse-proxy resources. Configure your web server accordingly.
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 app.config['DATABASE'] = 'data/fileserver.db'
 
 # Ρύθμιση απλών logs

@@ -139,29 +139,51 @@
                     {% set is_video = ext in ['mp4','avi','mkv','mov','wmv','flv','m4v'] or file.mimetype.startswith('video/') %}
                     {% set is_audio = ext in ['mp3','wav','flac','aac','ogg','m4a'] or file.mimetype.startswith('audio/') %}
                     {% set is_image = ext in ['jpg','jpeg','png','gif','bmp','tiff','webp'] or file.mimetype.startswith('image/') %}
+
+                    {# Determine if the video format is supported for inline preview (HTML5).  Use the same
+                       list as in the view_file route.  If not supported (e.g. AVI, MKV, WMV, FLV), we will not
+                       show a play button and the filename will not be clickable. #}
+                    {% set supported_video_exts = ['mp4','m4v','mov','webm','ogv','ogg'] %}
+                    {% set can_preview_video = ext in supported_video_exts or file.mimetype in ['video/mp4','video/webm','video/ogg','video/quicktime'] %}
+                    {% set previewable = can_preview_video or is_audio or is_image %}
                     <div class="table-row file-row">
                         <div class="col-name">
                             <img src="{{ url_for('static', filename=icon_path) }}" alt="icon" class="table-icon-img">
-                            <span class="name-text">{{ file.original_name }}</span>
+                            {% if previewable %}
+                                <!-- Make previewable file names clickable to open the viewer -->
+                                <a href="{{ url_for('view_file', file_id=file.id) }}" class="name-text file-link">{{ file.original_name }}</a>
+                            {% else %}
+                                <span class="name-text">{{ file.original_name }}</span>
+                            {% endif %}
                         </div>
-                        <div class="col-size">{{ (file.size / 1024 / 1024) | round(2) }} MB</div>
+                        <div class="col-size">
+                            {% if file.size >= 1024 * 1024 * 1024 %}
+                                {{ (file.size / 1024 / 1024 / 1024) | round(2) }} GB
+                            {% elif file.size >= 1024 * 1024 %}
+                                {{ (file.size / 1024 / 1024) | round(2) }} MB
+                            {% elif file.size >= 1024 %}
+                                {{ (file.size / 1024) | round(2) }} KB
+                            {% else %}
+                                {{ file.size }} B
+                            {% endif %}
+                        </div>
                         <div class="col-date">{{ file.uploaded.split(' ')[0] }}</div>
                         <div class="col-actions">
-                            {% if is_video %}
-                            <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
-                                <span class="action-icon">▶️</span>
-                                <span class="action-text">Play</span>
-                            </a>
+                            {% if can_preview_video %}
+                                <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
+                                    <span class="action-icon">▶️</span>
+                                    <span class="action-text">Play</span>
+                                </a>
                             {% elif is_audio %}
-                            <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
-                                <span class="action-icon">🎵</span>
-                                <span class="action-text">Listen</span>
-                            </a>
+                                <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
+                                    <span class="action-icon">🎵</span>
+                                    <span class="action-text">Listen</span>
+                                </a>
                             {% elif is_image %}
-                            <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
-                                <span class="action-icon">👁️</span>
-                                <span class="action-text">View</span>
-                            </a>
+                                <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
+                                    <span class="action-icon">👁️</span>
+                                    <span class="action-text">View</span>
+                                </a>
                             {% endif %}
                             <a href="{{ url_for('download_file', file_id=file.id) }}" class="btn-download">
                                 <span class="action-icon">⬇️</span>
