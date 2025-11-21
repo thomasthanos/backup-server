@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ file.original_name }} - View File</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="dashboard">
+    <!-- Reuse the navbar from the dashboard for consistency -->
+    <nav class="navbar">
+        <div class="navbar-brand">📁 File Server</div>
+        <div class="navbar-menu">
+            <a href="{{ url_for('dashboard') }}">Dashboard</a>
+            <a href="{{ url_for('account') }}">Account</a>
+            <a href="{{ url_for('logout') }}">Logout</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="dashboard-header">
+            <h1>{{ file.original_name }}</h1>
+            <p>Preview of your file</p>
+        </div>
+
+        <div class="file-preview-card">
+            {% if is_video %}
+                <!-- Plyr video player integration -->
+                <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+                <div class="plyr-container">
+                    <video id="player" playsinline controls>
+                        <source src="{{ url_for('serve_file', file_id=file['id']) }}" type="{{ file.mimetype }}">
+                    </video>
+                </div>
+                <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        const player = new Plyr('#player', {
+                            controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'settings', 'fullscreen'],
+                            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+                            settings: ['speed'],
+                        });
+                    });
+                </script>
+            {% elif is_audio %}
+                <!-- Plyr audio player integration -->
+                <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css">
+                <audio id="player" controls>
+                    <source src="{{ url_for('serve_file', file_id=file['id']) }}" type="{{ file.mimetype }}">
+                </audio>
+                <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        const player = new Plyr('#player', {
+                            controls: ['play', 'progress', 'current-time', 'mute', 'volume', 'settings'],
+                            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] },
+                            settings: ['speed'],
+                        });
+                    });
+                </script>
+            {% elif is_image %}
+                <img src="{{ url_for('serve_file', file_id=file['id']) }}" alt="{{ file.original_name }}">
+            {% else %}
+                <p>This file type cannot be previewed. You can download it instead.</p>
+                <a href="{{ url_for('download_file', file_id=file['id']) }}" class="btn-download">⬇️ Download</a>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

@@ -83,71 +83,96 @@
             {% if folders or files %}
                 <h2>📂 {{ 'Current Folder' if current_folder else 'Your Files & Folders' }}</h2>
                 
-                <div class="items-grid">
-                    <!-- Folders -->
+                <!-- A compact, scrollable table for folders and files -->
+                <div class="item-table">
+                    <div class="table-header">
+                        <div class="col-name">Name</div>
+                        <div class="col-size">Size</div>
+                        <div class="col-date">Date</div>
+                        <div class="col-actions">Actions</div>
+                    </div>
+                    <!-- Render folders as rows -->
                     {% for folder in folders %}
-                        <div class="folder-card">
-                            <div class="folder-icon">📁</div>
-                            <div class="folder-name">{{ folder.name }}</div>
-                            <div class="folder-info">
-                                <div>Created: {{ folder.created.split(' ')[0] }}</div>
-                            </div>
-                            <div class="folder-actions">
-                                <a href="{{ url_for('dashboard', folder_id=folder.id) }}" class="btn-open">
-                                    📂 Open
-                                </a>
-                                <!-- Pass the folder ID as a string to avoid injecting raw Jinja expressions into JS -->
-                                <button onclick="deleteFolder('{{ folder.id }}')" class="btn-delete">
-                                    🗑️ Delete
-                                </button>
-                            </div>
+                    <div class="table-row folder-row">
+                        <div class="col-name">
+                            <span class="table-icon">📁</span>
+                            <span class="name-text">{{ folder.name }}</span>
                         </div>
+                        <div class="col-size">—</div>
+                        <div class="col-date">{{ folder.created.split(' ')[0] }}</div>
+                        <div class="col-actions">
+                            <a href="{{ url_for('dashboard', folder_id=folder.id) }}" class="btn-open">
+                                <span class="action-icon">📂</span>
+                                <span class="action-text">Open</span>
+                            </a>
+                            <button onclick="deleteFolder('{{ folder.id }}')" class="btn-delete">
+                                <span class="action-icon">🗑️</span>
+                                <span class="action-text">Delete</span>
+                            </button>
+                        </div>
+                    </div>
                     {% endfor %}
 
-                    <!-- Files -->
+                    <!-- Render files as rows -->
                     {% for file in files %}
-                        <div class="file-card">
-                            <div class="file-icon">
-                                {# Use SVG icons stored in static/icons based on extension or mimetype #}
-                                {% set ext = file.original_name.rsplit('.', 1)[-1].lower() if '.' in file.original_name else '' %}
-                                {% set icon_path = 'icons/default.svg' %}
-                                {# Determine icon based on common extensions #}
-                                {% if ext in ['jpg','jpeg','png','gif','bmp','tiff','webp'] or file.mimetype.startswith('image/') %}
-                                    {% set icon_path = 'icons/image.svg' %}
-                                {% elif ext in ['mp4','avi','mkv','mov','wmv','flv','m4v'] or file.mimetype.startswith('video/') %}
-                                    {% set icon_path = 'icons/video.svg' %}
-                                {% elif ext in ['mp3','wav','flac','aac','ogg','m4a'] or file.mimetype.startswith('audio/') %}
-                                    {% set icon_path = 'icons/audio.svg' %}
-                                {% elif ext in ['pdf'] or 'pdf' in file.mimetype %}
-                                    {% set icon_path = 'icons/document.svg' %}
-                                {% elif ext in ['zip','rar','7z','tar','gz','bz2','xz'] or 'zip' in file.mimetype or 'rar' in file.mimetype %}
-                                    {% set icon_path = 'icons/archive.svg' %}
-                                {% elif ext in ['doc','docx','odt','rtf','txt'] or 'word' in file.mimetype or 'document' in file.mimetype %}
-                                    {% set icon_path = 'icons/document.svg' %}
-                                {% elif ext in ['xls','xlsx','csv','ods'] or 'excel' in file.mimetype or 'sheet' in file.mimetype %}
-                                    {% set icon_path = 'icons/spreadsheet.svg' %}
-                                {% elif ext in ['exe','msi','dmg','pkg','apk','app'] %}
-                                    {% set icon_path = 'icons/executable.svg' %}
-                                {% elif ext in ['py','js','ts','jsx','tsx','html','css','c','cpp','cc','cxx','java','cs','rb','go','rs','php','swift','kt','kts','dart','scala','lua','json','xml','yaml','yml'] %}
-                                    {% set icon_path = 'icons/code.svg' %}
-                                {% endif %}
-                                <img src="{{ url_for('static', filename=icon_path) }}" alt="icon" class="file-icon-img">
-                            </div>
-                            <div class="file-name">{{ file.original_name }}</div>
-                            <div class="file-info">
-                                <div>{{ (file.size / 1024 / 1024) | round(2) }} MB</div>
-                                <div>{{ file.uploaded.split(' ')[0] }}</div>
-                            </div>
-                            <div class="file-actions">
-                                <a href="{{ url_for('download_file', file_id=file.id) }}" class="btn-download">
-                                    ⬇️ Download
-                                </a>
-                                <!-- Pass the file ID as a string to avoid injecting raw Jinja expressions into JS -->
-                                <button onclick="deleteFile('{{ file.id }}')" class="btn-delete">
-                                    🗑️ Delete
-                                </button>
-                            </div>
+                    {% set ext = file.original_name.rsplit('.', 1)[-1].lower() if '.' in file.original_name else '' %}
+                    {% set icon_path = 'icons/default.svg' %}
+                    {% if ext in ['jpg','jpeg','png','gif','bmp','tiff','webp'] or file.mimetype.startswith('image/') %}
+                        {% set icon_path = 'icons/image.svg' %}
+                    {% elif ext in ['mp4','avi','mkv','mov','wmv','flv','m4v'] or file.mimetype.startswith('video/') %}
+                        {% set icon_path = 'icons/video.svg' %}
+                    {% elif ext in ['mp3','wav','flac','aac','ogg','m4a'] or file.mimetype.startswith('audio/') %}
+                        {% set icon_path = 'icons/audio.svg' %}
+                    {% elif ext in ['pdf'] or 'pdf' in file.mimetype %}
+                        {% set icon_path = 'icons/document.svg' %}
+                    {% elif ext in ['zip','rar','7z','tar','gz','bz2','xz'] or 'zip' in file.mimetype or 'rar' in file.mimetype %}
+                        {% set icon_path = 'icons/archive.svg' %}
+                    {% elif ext in ['doc','docx','odt','rtf','txt'] or 'word' in file.mimetype or 'document' in file.mimetype %}
+                        {% set icon_path = 'icons/document.svg' %}
+                    {% elif ext in ['xls','xlsx','csv','ods'] or 'excel' in file.mimetype or 'sheet' in file.mimetype %}
+                        {% set icon_path = 'icons/spreadsheet.svg' %}
+                    {% elif ext in ['exe','msi','dmg','pkg','apk','app'] %}
+                        {% set icon_path = 'icons/executable.svg' %}
+                    {% elif ext in ['py','js','ts','jsx','tsx','html','css','c','cpp','cc','cxx','java','cs','rb','go','rs','php','swift','kt','kts','dart','scala','lua','json','xml','yaml','yml'] %}
+                        {% set icon_path = 'icons/code.svg' %}
+                    {% endif %}
+                    {% set is_video = ext in ['mp4','avi','mkv','mov','wmv','flv','m4v'] or file.mimetype.startswith('video/') %}
+                    {% set is_audio = ext in ['mp3','wav','flac','aac','ogg','m4a'] or file.mimetype.startswith('audio/') %}
+                    {% set is_image = ext in ['jpg','jpeg','png','gif','bmp','tiff','webp'] or file.mimetype.startswith('image/') %}
+                    <div class="table-row file-row">
+                        <div class="col-name">
+                            <img src="{{ url_for('static', filename=icon_path) }}" alt="icon" class="table-icon-img">
+                            <span class="name-text">{{ file.original_name }}</span>
                         </div>
+                        <div class="col-size">{{ (file.size / 1024 / 1024) | round(2) }} MB</div>
+                        <div class="col-date">{{ file.uploaded.split(' ')[0] }}</div>
+                        <div class="col-actions">
+                            {% if is_video %}
+                            <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
+                                <span class="action-icon">▶️</span>
+                                <span class="action-text">Play</span>
+                            </a>
+                            {% elif is_audio %}
+                            <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
+                                <span class="action-icon">🎵</span>
+                                <span class="action-text">Listen</span>
+                            </a>
+                            {% elif is_image %}
+                            <a href="{{ url_for('view_file', file_id=file.id) }}" class="btn-view">
+                                <span class="action-icon">👁️</span>
+                                <span class="action-text">View</span>
+                            </a>
+                            {% endif %}
+                            <a href="{{ url_for('download_file', file_id=file.id) }}" class="btn-download">
+                                <span class="action-icon">⬇️</span>
+                                <span class="action-text">Download</span>
+                            </a>
+                            <button onclick="deleteFile('{{ file.id }}')" class="btn-delete">
+                                <span class="action-icon">🗑️</span>
+                                <span class="action-text">Delete</span>
+                            </button>
+                        </div>
+                    </div>
                     {% endfor %}
                 </div>
             {% else %}

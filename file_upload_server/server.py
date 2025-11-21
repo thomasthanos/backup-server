@@ -12,7 +12,11 @@ import logging
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+# app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+# Upload size limit removed: the above line is commented out to allow
+# uploads of arbitrary size.  Be cautious when deploying in production
+# environments, as unrestricted upload sizes may impact server or
+# reverse-proxy resources. Configure your web server accordingly.
 app.config['DATABASE'] = 'data/fileserver.db'
 
 # Ρύθμιση απλών logs
@@ -284,6 +288,72 @@ def download_file(file_id):
     logger.info(f"Download - {file_info['original_name']}")
     
     return send_file(filepath, as_attachment=True, download_name=file_info['original_name'])
+
+@app.route('/file/<int:file_id>')
+def serve_file(file_id):
+    """
+    Serve a stored file inline with the correct MIME type. This route
+    allows media like videos, audio, and images to be embedded directly
+    in pages without forcing a download. Only authenticated users can
+    access their own files.
+    """
+    if 'user_id' not in session:
+        return redirect(url_for('signin'))
+    with get_db() as conn:
+        file_info = conn.execute(
+            'SELECT * FROM files WHERE id = ? AND user_id = ?',
+            (file_id, session['user_id'])
+        ).fetchone()
+    if not file_info:
+        flash('File not found', 'error')
+        return redirect(url_for('dashboard'))
+    # Build an absolute path to the requested file. Without an absolute
+    # path, Flask may fail to locate the file in different working
+    # directories. If the file is missing, redirect back with an error.
+    rel_path = os.path.join(app.config['UPLOAD_FOLDER'], file_info['stored_name'])
+    filepath = os.path.abspath(rel_path)
+    if not os.path.isfile(filepath):
+        flash('File not found on server', 'error')
+        return redirect(url_for('dashboard'))
+    # Serve the file inline without forcing a download. Avoid specifying
+    # download_name to maintain compatibility with older Flask versions.
+    return send_file(
+        filepath,
+        as_attachment=False,
+        mimetype=file_info['mimetype']
+    )
+
+@app.route('/view/<int:file_id>')
+def view_file(file_id):
+    """
+    Render a simple viewing page for media files such as videos, images,
+    and audio. For unsupported file types, provide a download link instead.
+    """
+    if 'user_id' not in session:
+        return redirect(url_for('signin'))
+    with get_db() as conn:
+        file_info = conn.execute(
+            'SELECT * FROM files WHERE id = ? AND user_id = ?',
+            (file_id, session['user_id'])
+        ).fetchone()
+    if not file_info:
+        flash('File not found', 'error')
+        return redirect(url_for('dashboard'))
+    # Determine file category for rendering
+    mimetype = file_info['mimetype'] or ''
+    ext = ''
+    if '.' in file_info['original_name']:
+        ext = file_info['original_name'].rsplit('.', 1)[-1].lower()
+    is_video = mimetype.startswith('video/') or ext in ['mp4', 'avi', 'mkv', 'mov', 'wmv', 'flv', 'm4v']
+    is_audio = mimetype.startswith('audio/') or ext in ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a']
+    is_image = mimetype.startswith('image/') or ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tiff', 'webp']
+    return render_template(
+        'file_view.html',
+        file=file_info,
+        is_video=is_video,
+        is_audio=is_audio,
+        is_image=is_image
+    )
 
 @app.route('/delete/<int:file_id>', methods=['POST'])
 def delete_file(file_id):

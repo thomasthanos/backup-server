@@ -29,6 +29,9 @@
     /* Interactive */
     --hover-bg: rgba(102, 126, 234, 0.1);
     --active-bg: rgba(102, 126, 234, 0.2);
+
+    /* Plyr main color to match our primary accent */
+    --plyr-color-main: var(--primary);
 }
 
 * {
@@ -293,6 +296,8 @@ body {
 
 .dashboard-header {
     margin-bottom: 40px;
+    /* Center align header content for a balanced layout */
+    text-align: center;
 }
 
 .dashboard-header h1 {
@@ -300,6 +305,7 @@ body {
     font-size: 36px;
     font-weight: 700;
     margin-bottom: 10px;
+    line-height: 1.2;
 }
 
 .dashboard-header p {
@@ -485,7 +491,9 @@ body {
 
 .items-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    /* Increase the minimum width of file/folder cards so that action buttons
+       have sufficient room to sit on one line without overflowing. */
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 20px;
 }
 
@@ -539,7 +547,11 @@ body {
 .file-actions button,
 .folder-actions a,
 .file-actions a {
-    flex: 1;
+    /* Allow flex items to shrink below their content width to prevent
+       overflow when space is constrained.  Setting flex-basis to 0
+       simplifies width distribution across multiple buttons. */
+    flex: 1 1 0;
+    min-width: 0;
     padding: 10px;
     border: none;
     border-radius: 8px;
@@ -576,6 +588,238 @@ body {
 
 .btn-delete:hover {
     background: #dc2626;
+}
+
+/* New button style for viewing or playing files (videos, images, audio) */
+.btn-view {
+    background: var(--secondary);
+    color: white;
+}
+.btn-view:hover {
+    background: #5e3c8a;
+}
+
+/* Animated gradient header on auth pages */
+.auth-header h1 {
+    background-size: 200% 200%;
+    animation: gradientShift 6s ease infinite;
+}
+
+/* -----------------------------------------------------------------------
+ * Custom styles for file and folder action buttons
+ * These rules override the earlier definitions to create larger, more
+ * visually appealing controls with icons and labels.  Buttons are laid
+ * out horizontally with generous spacing and share common hover effects
+ * for consistency.  Gradient backgrounds harmonise with the theme colours.
+ */
+
+/* Override the layout for the action containers */
+.folder-actions,
+.file-actions {
+    display: flex;
+    gap: 16px;
+    margin-top: 15px;
+}
+
+/* Base button styles: larger padding, rounded corners, flex layout for
+   icon/text alignment, and subtle shadowing */
+.folder-actions button,
+.file-actions button,
+.folder-actions a,
+.file-actions a {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px 20px;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+    user-select: none;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Hover effect: lift the button slightly and deepen the shadow */
+.folder-actions button:hover,
+.file-actions button:hover,
+.folder-actions a:hover,
+.file-actions a:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.25);
+}
+
+/* Gradient backgrounds for each button type */
+.btn-open,
+.btn-download {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: white;
+}
+.btn-open:hover,
+.btn-download:hover {
+    filter: brightness(0.9);
+}
+
+.btn-view {
+    background: linear-gradient(135deg, var(--secondary), var(--accent));
+    color: white;
+}
+.btn-view:hover {
+    filter: brightness(0.9);
+}
+
+.btn-delete {
+    background: linear-gradient(135deg, var(--danger), #b91c1c);
+    color: white;
+}
+.btn-delete:hover {
+    filter: brightness(0.9);
+}
+
+/* Icon and text styling within buttons */
+.action-icon {
+    font-size: 18px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+}
+
+.action-text {
+    font-size: 16px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+}
+
+@keyframes gradientShift {
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+/* Preview card styling for the file preview page */
+.file-preview-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    padding: 40px;
+    box-shadow: 0 20px 40px var(--glass-shadow);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    /* Limit the card width and center it within the container */
+    max-width: 900px;
+    width: 90%;
+    margin: 0 auto;
+}
+
+.file-preview-card video,
+.file-preview-card img,
+.file-preview-card audio {
+    width: 100%;
+    max-height: 70vh;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+}
+
+/* Custom video player container */
+.custom-video-player {
+    position: relative;
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.custom-video-player video {
+    width: 100%;
+    display: block;
+    border-radius: 12px;
+}
+
+/* Controls bar styling */
+.video-controls {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 15px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(10px);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.video-controls button,
+.video-controls select {
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 16px;
+    padding: 5px;
+}
+
+.video-controls button:hover,
+.video-controls select:hover {
+    color: var(--primary);
+}
+
+.video-controls input[type="range"] {
+    flex: 1;
+    cursor: pointer;
+    appearance: none;
+    height: 4px;
+    background: var(--glass-border);
+    border-radius: 5px;
+    outline: none;
+}
+
+.video-controls input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--primary);
+    cursor: pointer;
+    border: none;
+}
+
+.video-controls input[type="range"]::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--primary);
+    cursor: pointer;
+    border: none;
+}
+
+/* Round the default poster image of the Plyr player to match our design */
+.plyr__poster {
+    border-radius: 12px !important;
+    overflow: hidden;
+}
+
+/* Specific styling for progress and volume sliders */
+.video-controls input[type="range"].progress-range {
+    flex: 1;
+    margin: 0 10px;
+}
+
+.video-controls input[type="range"].volume-range {
+    width: 80px;
 }
 
 /* Alerts */
@@ -831,4 +1075,110 @@ body {
     height: 40px;
     flex-shrink: 0;
     color: var(--primary);
+}
+
+/* =======================================================================
+ * Compact list/table styles for the redesigned dashboard
+ * These classes are appended at the end of the stylesheet to ensure they
+ * override earlier definitions.  They provide a scrollable table layout
+ * for folders and files and unify the look of action buttons.
+ */
+.item-table {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 60vh;
+    border-radius: 16px;
+    border: 1px solid var(--glass-border);
+}
+
+.table-header,
+.table-row {
+    display: grid;
+    grid-template-columns: 1fr 100px 120px auto;
+    align-items: center;
+    padding: 12px 20px;
+}
+.table-header {
+    background: rgba(255, 255, 255, 0.05);
+    font-weight: 600;
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--glass-border);
+}
+.table-row {
+    border-bottom: 1px solid var(--glass-border);
+    transition: background 0.2s ease;
+}
+.table-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+.col-name {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+.table-icon {
+    font-size: 20px;
+    line-height: 1;
+}
+.table-icon-img {
+    width: 20px;
+    height: 20px;
+    margin-right: 4px;
+}
+.name-text {
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+.col-size,
+.col-date {
+    color: var(--text-secondary);
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.col-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+.col-actions a,
+.col-actions button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    border: none;
+    white-space: nowrap;
+}
+.col-actions .action-icon {
+    font-size: 16px;
+    line-height: 1;
+}
+
+/* Override hover styles for action buttons so they retain their gradient backgrounds */
+.btn-open:hover,
+.btn-download:hover {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    filter: brightness(1.1);
+}
+.btn-view:hover {
+    background: linear-gradient(135deg, var(--secondary), var(--accent));
+    filter: brightness(1.1);
+}
+.btn-delete:hover {
+    background: linear-gradient(135deg, var(--danger), #b91c1c);
+    filter: brightness(1.1);
 }
