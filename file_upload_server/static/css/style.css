@@ -1214,6 +1214,50 @@ body {
     text-decoration: underline;
     color: var(--primary);
 }
+
+/*
+ * -----------------------------------------------------------------------------
+ * Custom Plyr speed/settings menu overrides
+ *
+ * These rules override the default Plyr styles to ensure the entire menu uses
+ * our dark theme. They use !important to force precedence over Plyr's
+ * definitions.
+ */
+
+/* Base backgrounds for the menu container and inner panel */
+.plyr__menu__container,
+.plyr__menu__container [role=menu] {
+    background: #4d4d4d !important;
+    border-radius: 8px !important;
+}
+
+/* Arrow pointer colour */
+.plyr__menu__container:after {
+    border-top-color: #4d4d4d !important;
+}
+
+/* Label and arrow colours for menu items */
+.plyr__menu__container .plyr__control > span {
+    color: #ffffff !important;
+    font-weight: 700;
+}
+.plyr__menu__container .plyr__control--forward:after {
+    border-left-color: #ffffff !important;
+}
+
+/* Hover/focus/active states for menu items */
+.plyr__menu__container .plyr__control:hover,
+.plyr__menu__container .plyr__control:focus-visible,
+.plyr__menu__container .plyr__control[aria-selected="true"],
+.plyr__menu__container .plyr__control[aria-checked="true"] {
+    background: #5b5b5b !important;
+}
+
+/* Prevent radio button dots from changing colour on hover/focus */
+.plyr__menu__container .plyr__control[role=menuitemradio]:hover:before,
+.plyr__menu__container .plyr__control[role=menuitemradio]:focus-visible:before {
+    background: #0000001a !important;
+}
 .plyr__menu__container [role=menu]{
     background: rgb(173, 173, 173);
     border-radius: 8px;
