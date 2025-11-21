@@ -140,6 +140,36 @@ def register():
     flash('Account created successfully!', 'success')
     return redirect(url_for('dashboard'))
 
+@app.route('/request_password_reset', methods=['GET', 'POST'])
+def request_password_reset():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        
+        # Εδώ θα μπορούσατε να προσθέσετε λογική για αποστολή email reset
+        # Για τώρα, απλά εμφανίζουμε ένα μήνυμα
+        
+        flash('If an account with that email exists, a password reset link has been sent.', 'success')
+        return redirect(url_for('signin'))
+    
+    return render_template('request-password-reset.html')
+
+@app.route('/reset_password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    # Αυτό είναι ένα placeholder - θα χρειαστεί πραγματική λογική για token validation
+    if request.method == 'POST':
+        password = request.form.get('password')
+        confirm_password = request.form.get('confirm_password')
+        
+        if password != confirm_password:
+            flash('Passwords do not match', 'error')
+            return render_template('reset-password.html')
+        
+        # Εδώ θα μπορούσατε να ενημερώσετε τον κωδικό στη βάση δεδομένων
+        flash('Password has been reset successfully!', 'success')
+        return redirect(url_for('signin'))
+    
+    return render_template('reset-password.html')
+
 @app.route('/logout')
 def logout():
     email = session.get('user_email', 'Unknown')
