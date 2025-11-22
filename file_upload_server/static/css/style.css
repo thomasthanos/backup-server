@@ -681,6 +681,15 @@ body {
     filter: brightness(0.9);
 }
 
+/* Button for making a file public.  Uses success and primary colours */
+.btn-make-public {
+    background: linear-gradient(135deg, var(--success), var(--primary));
+    color: white;
+}
+.btn-make-public:hover {
+    filter: brightness(0.9);
+}
+
 /* Icon and text styling within buttons */
 .action-icon {
     font-size: 18px;

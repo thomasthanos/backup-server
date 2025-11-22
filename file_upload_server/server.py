@@ -621,12 +621,14 @@ def dashboard(folder_id=None):
         is_admin = True
     if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
         is_admin = True
+    current_user_id = session.get('user_id')
     return render_template('dashboard.html', 
                          files=files, 
                          folders=folders,
                          current_folder=current_folder,
                          breadcrumbs=breadcrumbs,
-                         is_admin=is_admin)
+                         is_admin=is_admin,
+                         current_user_id=current_user_id)
 
 def get_breadcrumbs(conn, folder_id):
     breadcrumbs = []
@@ -941,6 +943,32 @@ def view_file(file_id):
         is_audio=is_audio,
         is_image=is_image
     )
+
+
+@app.route('/make_public/<int:file_id>', methods=['POST'])
+def make_public(file_id):
+    """
+    Endpoint for the administrator to mark a file as public.  Only users
+    identified as admins via ADMIN_ID or ADMIN_EMAIL may perform this action.
+    """
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    # Determine if current user is admin
+    is_admin_user = False
+    if session.get('user_id') == ADMIN_ID:
+        is_admin_user = True
+    if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
+        is_admin_user = True
+    if not is_admin_user:
+        return jsonify({'error': 'Not authorized'}), 403
+    with get_db() as conn:
+        # Ensure the file exists
+        file_info = conn.execute('SELECT * FROM files WHERE id = ?', (file_id,)).fetchone()
+        if not file_info:
+            return jsonify({'error': 'File not found'}), 404
+        conn.execute('UPDATE files SET is_public = 1 WHERE id = ?', (file_id,))
+    logger.info(f"File marked as public - ID {file_id}")
+    return jsonify({'success': True})
 
 @app.route('/delete/<int:file_id>', methods=['POST'])
 def delete_file(file_id):

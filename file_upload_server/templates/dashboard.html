@@ -205,10 +205,18 @@
                                 <span class="action-icon">⬇️</span>
                                 <span class="action-text">Download</span>
                             </a>
+                            {% if file.user_id == current_user_id or is_admin %}
                             <button onclick="deleteFile('{{ file.id }}')" class="btn-delete">
                                 <span class="action-icon">🗑️</span>
                                 <span class="action-text">Delete</span>
                             </button>
+                            {% endif %}
+                            {% if is_admin and not file.is_public %}
+                            <button onclick="makePublic('{{ file.id }}')" class="btn-make-public">
+                                <span class="action-icon">🌍</span>
+                                <span class="action-text">Public</span>
+                            </button>
+                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}
