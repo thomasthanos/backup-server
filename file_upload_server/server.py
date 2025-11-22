@@ -723,11 +723,19 @@ def upload_file():
     with get_db() as conn:
         user_base = get_user_base_path(conn, session['user_id'])
         rel_path = ''
+        # Αντικατάσταση του υπάρχοντος κώδικα:
         folder_id_int = None
         if folder_id:
             try:
                 folder_id_int = int(folder_id)
                 rel_path = get_folder_relative_path(conn, folder_id_int)
+                # Έλεγχος αν ο φάκελος υπάρχει και ανήκει στον χρήστη
+                folder_check = conn.execute(
+                    'SELECT id FROM folders WHERE id = ? AND user_id = ?', 
+                    (folder_id_int, session['user_id'])
+                ).fetchone()
+                if not folder_check:
+                    return jsonify({'error': 'Folder not found or access denied'}), 400
             except ValueError:
                 return jsonify({'error': 'Invalid folder ID'}), 400
         if rel_path:
