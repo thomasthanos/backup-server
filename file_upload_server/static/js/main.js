@@ -543,3 +543,9 @@ function makePublic(fileId) {
             });
         });
     }
+
+    // Expose the makeFolderPublic function to the global scope so it can be
+    // called from inline HTML onclick attributes. Without assigning it to
+    // window, some browsers may treat it as module-scoped and it will be
+    // undefined when referenced from HTML.
+    window.makeFolderPublic = makeFolderPublic;
