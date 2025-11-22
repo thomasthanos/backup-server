@@ -120,6 +120,13 @@ function handleFileUpload(file) {
     if (typeof currentFolderId !== 'undefined' && currentFolderId !== null) {
         formData.append('folder_id', currentFolderId);
     }
+    // If the admin has selected the public toggle, include a flag so the server
+    // marks the upload as public.  The admin flag is determined on the server
+    // side; here we just send the field if the checkbox exists and is checked.
+    const publicCheckbox = document.getElementById('publicCheckbox');
+    if (publicCheckbox && publicCheckbox.checked) {
+        formData.append('public', '1');
+    }
     // Show progress
     progressContainer.style.display = 'block';
     progressFill.style.width = '0%';
@@ -194,6 +201,12 @@ function uploadLargeFile(file, chunkSize) {
         // Add folder_id if we're inside a folder
         if (typeof currentFolderId !== 'undefined' && currentFolderId !== null) {
             formData.append('folder_id', currentFolderId);
+        }
+        // Include the public flag if the admin selected the public toggle.  The
+        // server will ignore this for non-admin users.
+        const publicCheckbox = document.getElementById('publicCheckbox');
+        if (publicCheckbox && publicCheckbox.checked) {
+            formData.append('public', '1');
         }
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/upload');

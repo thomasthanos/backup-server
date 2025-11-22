@@ -30,6 +30,17 @@ app.config['MAX_CONTENT_LENGTH'] = None
 app.config['CHUNK_TEMP_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_chunks')
 app.config['DATABASE'] = 'data/fileserver.db'
 
+# Define an admin user ID.  In this simplified example the user with ID 1
+# is considered the administrator.  The admin has the ability to mark
+# uploads as public so that all users can view and download them.
+# The original implementation used ADMIN_ID to indicate which user is the
+# administrator.  To provide a more robust mechanism you can also specify
+# an ADMIN_EMAIL; if a user's email matches this value they will be treated
+# as admin regardless of ID.  You can leave ADMIN_EMAIL unset (None) to
+# disable email-based admin selection.
+ADMIN_ID = 1
+ADMIN_EMAIL = os.environ.get('FILESERVER_ADMIN_EMAIL')  # override via environment if desired
+
 app.config['SMTP_SERVER'] = 'smtp.gmail.com'
 app.config['SMTP_PORT'] = 587
 app.config['SMTP_USERNAME'] = 'plussd090@gmail.com'
@@ -82,6 +93,9 @@ def init_db():
                 FOREIGN KEY (parent_id) REFERENCES folders(id)
             );
             
+            -- Added an is_public column to the files table.  This flag
+            -- determines whether a file is visible to all users (1) or only
+            -- to its owner (0).  Older databases will be migrated below.
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 original_name TEXT NOT NULL,
@@ -91,6 +105,7 @@ def init_db():
                 size INTEGER NOT NULL,
                 mimetype TEXT NOT NULL,
                 uploaded TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_public BOOLEAN DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (folder_id) REFERENCES folders(id)
             );
@@ -112,6 +127,13 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_tokens_token ON tokens(token);
             CREATE INDEX IF NOT EXISTS idx_tokens_user_type ON tokens(user_id, token_type);
         ''')
+        # If the is_public column does not exist (e.g. in older databases), add it.
+        try:
+            cols = [row[1] for row in conn.execute('PRAGMA table_info(files)').fetchall()]
+            if 'is_public' not in cols:
+                conn.execute('ALTER TABLE files ADD COLUMN is_public BOOLEAN DEFAULT 0')
+        except Exception:
+            pass
 
 init_db()
 
@@ -553,10 +575,19 @@ def dashboard(folder_id=None):
             folder_dict['size'] = size_row['total'] or 0
             folders.append(folder_dict)
         
-        file_rows = conn.execute(
-            'SELECT * FROM files WHERE user_id = ? AND folder_id IS ? ORDER BY uploaded DESC',
-            (session['user_id'], folder_id)
-        ).fetchall()
+        # Select files for the current view.  When at the root folder (folder_id is None),
+        # include any public files (is_public = 1) that live in the root (folder_id IS NULL).
+        # Otherwise, only list files owned by the current user within the given folder.
+        if folder_id is None:
+            file_rows = conn.execute(
+                'SELECT * FROM files WHERE ((user_id = ? AND folder_id IS NULL) OR (is_public = 1 AND folder_id IS NULL)) ORDER BY uploaded DESC',
+                (session['user_id'],)
+            ).fetchall()
+        else:
+            file_rows = conn.execute(
+                'SELECT * FROM files WHERE user_id = ? AND folder_id = ? ORDER BY uploaded DESC',
+                (session['user_id'], folder_id)
+            ).fetchall()
         files = []
         for row in file_rows:
             file_dict = dict(row)
@@ -583,11 +614,19 @@ def dashboard(folder_id=None):
                 continue
             files.append(file_dict)
     
+    # Determine if the current user is the admin.  A user is admin if their
+    # id matches ADMIN_ID or their email matches ADMIN_EMAIL.
+    is_admin = False
+    if session.get('user_id') == ADMIN_ID:
+        is_admin = True
+    if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
+        is_admin = True
     return render_template('dashboard.html', 
                          files=files, 
                          folders=folders,
                          current_folder=current_folder,
-                         breadcrumbs=breadcrumbs)
+                         breadcrumbs=breadcrumbs,
+                         is_admin=is_admin)
 
 def get_breadcrumbs(conn, folder_id):
     breadcrumbs = []
@@ -721,9 +760,24 @@ def upload_file():
                 except OSError:
                     pass
                 # Insert file record into the database
+                # Determine whether this file should be public.  Only admins can set this flag.
+                # Determine whether this file should be public.  Only admins can set this flag.
+                is_public_val = 0
+                # Determine admin status based on ID or email
+                is_admin_user = False
+                if session.get('user_id') == ADMIN_ID:
+                    is_admin_user = True
+                if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
+                    is_admin_user = True
+                if is_admin_user:
+                    # Accept either "public" or "is_public" form fields.  Any truthy
+                    # string ("1", "true", etc.) will mark the file as public.
+                    pub_flag = request.form.get('public') or request.form.get('is_public') or ''
+                    if str(pub_flag).lower() in ['1', 'true', 'yes', 'on']:
+                        is_public_val = 1
                 conn.execute(
-                    'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype) VALUES (?, ?, ?, ?, ?, ?)',
-                    (original_filename, unique_filename, session['user_id'], folder_id_val, total_size, mimetypes.guess_type(original_filename)[0] or 'application/octet-stream')
+                    'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype, is_public) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    (original_filename, unique_filename, session['user_id'], folder_id_val, total_size, mimetypes.guess_type(original_filename)[0] or 'application/octet-stream', is_public_val)
                 )
             logger.info(f"Chunked upload assembled - {original_filename}")
             return jsonify({'success': True, 'assembled': True})
@@ -758,10 +812,22 @@ def upload_file():
         filepath = os.path.join(upload_dir, unique_filename)
         file_part.save(filepath)
         file_size = os.path.getsize(filepath)
+        # Determine if the file should be public.  Only admins can set public
+        # files.  Accept either "public" or "is_public" fields from the form.
+        is_public_val = 0
+        is_admin_user = False
+        if session.get('user_id') == ADMIN_ID:
+            is_admin_user = True
+        if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
+            is_admin_user = True
+        if is_admin_user:
+            pub_flag = request.form.get('public') or request.form.get('is_public') or ''
+            if str(pub_flag).lower() in ['1', 'true', 'yes', 'on']:
+                is_public_val = 1
         conn.execute(
-            'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype) VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype, is_public) VALUES (?, ?, ?, ?, ?, ?, ?)',
             (filename, unique_filename, session['user_id'], folder_id_int, file_size, 
-             mimetypes.guess_type(filename)[0] or 'application/octet-stream')
+             mimetypes.guess_type(filename)[0] or 'application/octet-stream', is_public_val)
         )
     logger.info(f"Upload επιτυχές - {filename}")
     return jsonify({'success': True, 'assembled': True})
@@ -772,8 +838,9 @@ def download_file(file_id):
         return redirect(url_for('signin'))
     
     with get_db() as conn:
+        # Allow download if the file belongs to the current user or is public
         file_info = conn.execute(
-            'SELECT * FROM files WHERE id = ? AND user_id = ?',
+            'SELECT * FROM files WHERE id = ? AND (user_id = ? OR is_public = 1)',
             (file_id, session['user_id'])
         ).fetchone()
     
@@ -811,8 +878,9 @@ def serve_file(file_id):
     if 'user_id' not in session:
         return redirect(url_for('signin'))
     with get_db() as conn:
+        # Allow serving the file if the current user is the owner or the file is public
         file_info = conn.execute(
-            'SELECT * FROM files WHERE id = ? AND user_id = ?',
+            'SELECT * FROM files WHERE id = ? AND (user_id = ? OR is_public = 1)',
             (file_id, session['user_id'])
         ).fetchone()
     if not file_info:
@@ -851,8 +919,9 @@ def view_file(file_id):
     if 'user_id' not in session:
         return redirect(url_for('signin'))
     with get_db() as conn:
+        # Allow viewing if the file belongs to the current user or is public
         file_info = conn.execute(
-            'SELECT * FROM files WHERE id = ? AND user_id = ?',
+            'SELECT * FROM files WHERE id = ? AND (user_id = ? OR is_public = 1)',
             (file_id, session['user_id'])
         ).fetchone()
     if not file_info:
