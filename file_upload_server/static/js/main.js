@@ -84,7 +84,7 @@ if (uploadArea) {
     uploadArea.addEventListener('drop', (e) => {
         e.preventDefault();
         uploadArea.classList.remove('dragover');
-        
+
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             handleFileUpload(files[0]);
@@ -352,7 +352,7 @@ function uploadLargeFile(file, chunkSize, resumeState = null) {
 // Create folder handler
 function createFolder() {
     const folderName = document.getElementById('folderNameInput').value.trim();
-    
+
     if (!folderName) {
         // Use custom alert modal for empty folder name
         showAlert('Please enter a folder name');
@@ -361,36 +361,29 @@ function createFolder() {
 
     const formData = new FormData();
     formData.append('folder_name', folderName);
-    
+
     // Add parent_id if we're inside a folder
     if (typeof currentFolderId !== 'undefined' && currentFolderId !== null) {
         formData.append('parent_id', currentFolderId);
     }
 
-        // If the administrator has selected the "public folder" toggle, include the public
-        // flag in the request.  The server will ignore this flag for non-admin users.
-        const publicFolderCheckbox = document.getElementById('publicFolderCheckbox');
-        if (publicFolderCheckbox && publicFolderCheckbox.checked) {
-            formData.append('public', '1');
-        }
-
     fetch('/create_folder', {
         method: 'POST',
         body: formData
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            window.location.reload();
-        } else {
-            // Show error in custom modal
-            showAlert('Failed to create folder: ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        showAlert('Failed to create folder');
-    });
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.reload();
+            } else {
+                // Show error in custom modal
+                showAlert('Failed to create folder: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            showAlert('Failed to create folder');
+        });
 }
 
 // Delete file handler
@@ -398,23 +391,23 @@ function deleteFile(fileId) {
     // Display confirmation modal before deleting a file
     showConfirm('Are you sure you want to delete this file?', () => {
         fetch(`/delete/${fileId}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                window.location.reload();
-            } else {
-                showAlert('Failed to delete file: ' + (data.error || 'Unknown error'));
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
         })
-        .catch(error => {
-            console.error('Error:', error);
-            showAlert('Failed to delete file');
-        });
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    showAlert('Failed to delete file: ' + (data.error || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showAlert('Failed to delete file');
+            });
     });
 }
 
@@ -423,23 +416,23 @@ function deleteFolder(folderId) {
     // Display confirmation modal before deleting a folder
     showConfirm('Are you sure you want to delete this folder? It must be empty.', () => {
         fetch(`/delete_folder/${folderId}`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                window.location.reload();
-            } else {
-                showAlert('Failed to delete folder: ' + (data.error || 'Folder must be empty'));
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
             }
         })
-        .catch(error => {
-            console.error('Error:', error);
-            showAlert('Failed to delete folder');
-        });
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    showAlert('Failed to delete folder: ' + (data.error || 'Folder must be empty'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showAlert('Failed to delete folder');
+            });
     });
 }
 
@@ -493,53 +486,22 @@ function makePublic(fileId) {
         fetch(`/make_public/${fileId}`, {
             method: 'POST'
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                // The file was successfully marked as public. Refresh the page
-                // so the user can see the updated status and remove the public
-                // button for this entry.
-                window.location.reload();
-            } else {
-                // Display any error returned by the server
-                const errorMsg = data.error || 'Failed to update file';
-                showAlert(errorMsg);
-            }
-        })
-        .catch(error => {
-            console.error('Error making file public:', error);
-            showAlert('Failed to update file');
-        });
-        });
-    }
-
-    /**
-     * Mark a folder (and its subfolders/files) as public.  Only administrators have
-     * permission to perform this action on the server; the client simply sends a
-     * POST request to the /make_folder_public endpoint after confirming with the user.
-     * @param {number} folderId
-     */
-    function makeFolderPublic(folderId) {
-        // Prompt the admin for confirmation.  The message explains that the
-        // entire folder hierarchy will become public.
-        showConfirm('Are you sure you want to make this folder public? All files and subfolders will become public.', () => {
-            fetch(`/make_folder_public/${folderId}`, {
-                method: 'POST'
-            })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Reload to reflect the updated folder visibility and remove
-                    // the public button for this entry.
+                    // The file was successfully marked as public. Refresh the page
+                    // so the user can see the updated status and remove the public
+                    // button for this entry.
                     window.location.reload();
                 } else {
-                    const errorMsg = data.error || 'Failed to update folder';
+                    // Display any error returned by the server
+                    const errorMsg = data.error || 'Failed to update file';
                     showAlert(errorMsg);
                 }
             })
             .catch(error => {
-                console.error('Error making folder public:', error);
-                showAlert('Failed to update folder');
+                console.error('Error making file public:', error);
+                showAlert('Failed to update file');
             });
-        });
-    }
+    });
+}

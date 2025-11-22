@@ -64,15 +64,9 @@
             </div>
 
             {% if is_admin %}
-            <!-- Toggle for making a new file public -->
             <div class="public-toggle" style="margin-bottom: 10px;">
                 <input type="checkbox" id="publicCheckbox">
                 <label for="publicCheckbox">Δημόσιο αρχείο (ορατό σε όλους)</label>
-            </div>
-            <!-- Toggle for making a new folder public -->
-            <div class="public-toggle" style="margin-bottom: 10px;">
-                <input type="checkbox" id="publicFolderCheckbox">
-                <label for="publicFolderCheckbox">Δημόσιος φάκελος (ορατός σε όλους)</label>
             </div>
             {% endif %}
             <div class="upload-area" id="uploadArea">
@@ -109,9 +103,6 @@
                         <div class="col-name">
                             <span class="table-icon">📁</span>
                             <span class="name-text">{{ folder.name }}</span>
-                            {% if folder.is_public %}
-                                <span title="Public folder" class="public-indicator">🌍</span>
-                            {% endif %}
                         </div>
                         <div class="col-size">
                             {% if folder.size >= 1024 * 1024 * 1024 %}
@@ -130,18 +121,10 @@
                                 <span class="action-icon">📂</span>
                                 <span class="action-text">Open</span>
                             </a>
-                            {% if folder.user_id == current_user_id or is_admin %}
                             <button onclick="deleteFolder('{{ folder.id }}')" class="btn-delete">
                                 <span class="action-icon">🗑️</span>
                                 <span class="action-text">Delete</span>
                             </button>
-                            {% endif %}
-                            {% if is_admin and not folder.is_public %}
-                            <button onclick="makeFolderPublic('{{ folder.id }}')" class="btn-make-public-folder">
-                                <span class="action-icon">🌍</span>
-                                <span class="action-text">Public</span>
-                            </button>
-                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}
@@ -187,9 +170,6 @@
                                 <a href="{{ url_for('view_file', file_id=file.id) }}" class="name-text file-link">{{ file.original_name }}</a>
                             {% else %}
                                 <span class="name-text">{{ file.original_name }}</span>
-                            {% endif %}
-                            {% if file.is_public %}
-                                <span title="Public file" class="public-indicator">🌍</span>
                             {% endif %}
                         </div>
                         <div class="col-size">
@@ -271,9 +251,6 @@
             return idStr ? parseInt(idStr) : null;
         })();
     </script>
-    <!-- main.js includes logic for uploading files and managing folders.  To include the public flag when creating
-         a folder, update the createFolder() function in main.js to read the state of the publicFolderCheckbox
-         and append a 'public' field to the FormData when sending the request.  -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>
