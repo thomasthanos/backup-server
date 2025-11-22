@@ -3,17 +3,41 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 import mimetypes
 import sqlite3
 from contextlib import contextmanager
 import logging
+import smtplib
+# Use the correct class names from the ``email.mime`` package.  In
+# Python's ``email.mime`` API, the classes are capitalized as
+# ``MIMEText`` and ``MIMEMultipart``.  Importing them with the wrong
+# capitalization (e.g. ``MimeText`` or ``MimeMultipart``) will raise
+# ImportError in Python 3.13+.
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import uuid
+import random
+import string
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(32)
+# Use a stable secret key so that session cookies remain valid across restarts.
+# If you deploy this application, replace the value below with a strong random
+# secret key and consider loading it from an environment variable.
+app.secret_key = 'a1b2c3d4e5f6g7h8i9j0'
 app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
+# Remove the default maximum file upload size limit. By setting MAX_CONTENT_LENGTH
+# to None, uploads are not restricted by Flask (other layers like the web server
+# may still impose limits). Previously this was set to 500MB.
+app.config['MAX_CONTENT_LENGTH'] = None
 app.config['DATABASE'] = 'data/fileserver.db'
+
+# Ρυθμίσεις SMTP
+app.config['SMTP_SERVER'] = 'smtp.gmail.com'
+app.config['SMTP_PORT'] = 587
+app.config['SMTP_USERNAME'] = 'plussd090@gmail.com'  # Αλλαγή με το email σας
+app.config['SMTP_PASSWORD'] = 'ncchuzjbkkgidnih'     # Αλλαγή με τον κωδικό εφαρμογής
+app.config['BASE_URL'] = 'http://localhost:5000'      # Αλλαγή με το URL της εφαρμογής σας
 
 # Ρύθμιση απλών logs
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -51,6 +75,7 @@ def init_db():
                 email TEXT UNIQUE NOT NULL,
                 password TEXT NOT NULL,
                 name TEXT,
+                email_verified BOOLEAN DEFAULT 0,
                 created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
             
@@ -77,12 +102,117 @@ def init_db():
                 FOREIGN KEY (folder_id) REFERENCES folders(id)
             );
             
+            CREATE TABLE IF NOT EXISTS tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token TEXT UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL,
+                token_type TEXT NOT NULL, -- 'email_verify' ή 'password_reset'
+                expires TIMESTAMP NOT NULL,
+                used BOOLEAN DEFAULT 0,
+                created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            
             CREATE INDEX IF NOT EXISTS idx_files_user ON files(user_id);
             CREATE INDEX IF NOT EXISTS idx_files_folder ON files(folder_id);
             CREATE INDEX IF NOT EXISTS idx_folders_user ON folders(user_id);
+            CREATE INDEX IF NOT EXISTS idx_tokens_token ON tokens(token);
+            CREATE INDEX IF NOT EXISTS idx_tokens_user_type ON tokens(user_id, token_type);
         ''')
 
 init_db()
+
+# Συνάρτηση αποστολής email
+def send_email(to_email, subject, body):
+    try:
+        # Create a multipart message using the correct class name.  The
+        # ``MIMEMultipart`` class handles the multipart container for
+        # email messages.  It must be imported as ``MIMEMultipart`` (see
+        # imports above).
+        msg = MIMEMultipart()
+        msg['From'] = app.config['SMTP_USERNAME']
+        msg['To'] = to_email
+        msg['Subject'] = subject
+        
+        # Attach the HTML body using ``MIMEText``.  ``MIMEText`` should
+        # always be imported and referenced with the proper uppercase
+        # name, otherwise Python will raise ImportError.
+        msg.attach(MIMEText(body, 'html'))
+        
+        server = smtplib.SMTP(app.config['SMTP_SERVER'], app.config['SMTP_PORT'])
+        server.starttls()
+        server.login(app.config['SMTP_USERNAME'], app.config['SMTP_PASSWORD'])
+        server.send_message(msg)
+        server.quit()
+        return True
+    except Exception as e:
+        print(f"Σφάλμα αποστολής email: {e}")
+        return False
+
+# Συνάρτηση δημιουργίας token
+def create_token(user_id, token_type, expires_hours=24, conn=None):
+    """
+    Create a new token for a user and return it.
+
+    If a database connection is provided via the ``conn`` parameter, the token
+    insert will occur on that connection. Otherwise, a new connection will be
+    obtained from ``get_db()``. Accepting an optional connection avoids
+    nested ``with get_db()`` blocks, which can cause SQLite to lock the
+    database when multiple write transactions overlap.
+    """
+    token = str(uuid.uuid4())
+    expires = datetime.now() + timedelta(hours=expires_hours)
+    
+    if conn is not None:
+        conn.execute(
+            'INSERT INTO tokens (token, user_id, token_type, expires) VALUES (?, ?, ?, ?)',
+            (token, user_id, token_type, expires)
+        )
+    else:
+        with get_db() as conn_local:
+            conn_local.execute(
+                'INSERT INTO tokens (token, user_id, token_type, expires) VALUES (?, ?, ?, ?)',
+                (token, user_id, token_type, expires)
+            )
+    return token
+
+# Generate and store a short‑lived numeric verification code for email verification.
+def create_code(user_id, token_type, expires_minutes=5, length=6, conn=None):
+    """
+    Create a numeric verification code for a user. The code will expire after
+    the specified number of minutes. Returns the code string. If a database
+    connection is provided, the code is inserted using that connection to avoid
+    nested transactions.
+    """
+    # Generate a random numeric code of the desired length
+    code = ''.join(random.choices(string.digits, k=length))
+    expires = datetime.now() + timedelta(minutes=expires_minutes)
+    if conn is not None:
+        conn.execute(
+            'INSERT INTO tokens (token, user_id, token_type, expires) VALUES (?, ?, ?, ?)',
+            (code, user_id, token_type, expires)
+        )
+    else:
+        with get_db() as conn_local:
+            conn_local.execute(
+                'INSERT INTO tokens (token, user_id, token_type, expires) VALUES (?, ?, ?, ?)',
+                (code, user_id, token_type, expires)
+            )
+    return code
+
+# Συνάρτηση επαλήθευσης token
+def verify_token(token, token_type):
+    with get_db() as conn:
+        token_data = conn.execute(
+            'SELECT * FROM tokens WHERE token = ? AND token_type = ? AND used = 0 AND expires > ?',
+            (token, token_type, datetime.now())
+        ).fetchone()
+        
+        if token_data:
+            # Σημειώνουμε το token ως χρησιμοποιημένο
+            conn.execute('UPDATE tokens SET used = 1 WHERE id = ?', (token_data['id'],))
+            return token_data
+        return None
 
 @app.route('/')
 def index():
@@ -92,35 +222,65 @@ def index():
 
 @app.route('/signin', methods=['GET', 'POST'])
 def signin():
+    # If the user is already logged in (has an active session), redirect them to the dashboard instead of showing the sign‑in page again.
+    if 'user_id' in session:
+        return redirect(url_for('dashboard'))
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
         
-        # Παίρνουμε την IP του χρήστη
         user_ip = request.remote_addr
         
         with get_db() as conn:
             user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
-            
+
             if user and check_password_hash(user['password'], password):
+                # If the user's email is not yet verified, send a one‑time code instead of a link
+                if not user['email_verified']:
+                    # Generate a short‑lived numeric code (5 minute expiry)
+                    code = create_code(user['id'], 'email_code', expires_minutes=5, conn=conn)
+                    # Prepare email with the verification code
+                    email_body = f"""
+                    <html>
+                    <body>
+                        <h2>Email Verification Code</h2>
+                        <p>Your verification code is: <strong>{code}</strong></p>
+                        <p>This code is valid for 5 minutes. Please enter it along with your password to verify your account.</p>
+                    </body>
+                    </html>
+                    """
+                    send_email(email, "Email Verification Code - File Upload Server", email_body)
+                    flash('A verification code has been sent to your email. Please enter it along with your password to verify your account.', 'success')
+                    # Store user info in session so that /verify_code can associate the code with the user
+                    session['user_id'] = user['id']
+                    session['user_email'] = user['email']
+                    return redirect(url_for('verify_code'))
+
+                # Email already verified: log the user in normally
                 session['user_id'] = user['id']
                 session['user_email'] = user['email']
-                # ΝΕΟ: Προσθήκη IP στο μήνυμα επιτυχίας
                 logger.info(f"Σύνδεση επιτυχής - {email} από IP: {user_ip}")
                 flash('Successfully logged in!', 'success')
                 return redirect(url_for('dashboard'))
             else:
-                # ΝΕΟ: Προσθήκη IP στο μήνυμα αποτυχίας
                 logger.info(f"Αποτυχημένη σύνδεση - {email} από IP: {user_ip}")
                 flash('Invalid email or password', 'error')
     
-    return render_template('signin.html')
+    # Determine whether we should show the login form (instead of the registration form).
+    # Accept multiple possible query parameters for flexibility (e.g., show_login, show_login, login).
+    show_login = False
+    for key in ['show_login', 'show_login', 'login']:
+        val = request.args.get(key)
+        if val and val.lower() in ['1', 'true', 'yes']:
+            show_login = True
+            break
+    return render_template('signin.html', show_login=show_login)
 
 @app.route('/register', methods=['POST'])
 def register():
     email = request.form.get('email')
     password = request.form.get('password')
-    name = request.form.get('name', email.split('@')[0])
+    name = request.form.get('name', '').strip()
     
     with get_db() as conn:
         existing = conn.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone()
@@ -128,47 +288,204 @@ def register():
         if existing:
             flash('Email already registered', 'error')
             return redirect(url_for('signin'))
+
+        # Require a non-empty name
+        if not name:
+            flash('Name is required', 'error')
+            return redirect(url_for('signin'))
         
         conn.execute('INSERT INTO users (email, password, name) VALUES (?, ?, ?)',
                     (email, generate_password_hash(password), name))
         
         user = conn.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone()
+        
+        # Generate a numeric verification code valid for 5 minutes
+        code = create_code(user['id'], 'email_code', expires_minutes=5, conn=conn)
+        
+        # Send email with verification code instead of a link
+        email_body = f"""
+        <html>
+        <body>
+            <h2>Welcome to File Upload Server!</h2>
+            <p>Your verification code is: <strong>{code}</strong></p>
+            <p>This code is valid for 5 minutes. Please enter it along with your password to activate your account.</p>
+            <p>If you didn't create an account, you can safely ignore this email.</p>
+        </body>
+        </html>
+        """
+        
+        if send_email(email, "Verify Your Email - File Upload Server", email_body):
+            flash('Account created successfully! A verification code has been sent to your email. Please enter it along with your password.', 'success')
+        else:
+            flash('Account created successfully! But we could not send the verification code email. Please contact support.', 'warning')
+        
+        # Store session details so the user can verify their code
         session['user_id'] = user['id']
         session['user_email'] = email
-        
+
     logger.info(f"Νέος χρήστης - {email}")
-    flash('Account created successfully!', 'success')
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('verify_code'))
+
+# Route για αναμονή επαλήθευσης
+@app.route('/verify_pending')
+def verify_pending():
+    if 'user_id' not in session:
+        return redirect(url_for('signin'))
+    return render_template('verify-pending.html')
+
+# Route για επαλήθευση email
+@app.route('/verify_email/<token>')
+def verify_email(token):
+    token_data = verify_token(token, 'email_verify')
+    
+    if token_data:
+        with get_db() as conn:
+            conn.execute('UPDATE users SET email_verified = 1 WHERE id = ?', (token_data['user_id'],))
+        
+        flash('Email verified successfully! You can now use all features.', 'success')
+        return redirect(url_for('dashboard'))
+    else:
+        flash('Invalid or expired verification link.', 'error')
+        return redirect(url_for('signin'))
+
+# Route for verifying a numeric code sent via email.  When a user registers
+# or attempts to sign in without a verified email, a short‑lived code is
+# generated and emailed to them.  This route presents a form where the
+# user can enter the code and their account password.  If both the code
+# and password match, the user's email is marked as verified.
+@app.route('/verify_code', methods=['GET', 'POST'])
+def verify_code():
+    # User must be logged in (via session) to verify their code
+    if 'user_id' not in session:
+        return redirect(url_for('signin'))
+    if request.method == 'POST':
+        code = request.form.get('code', '').strip()
+        password = request.form.get('password', '')
+        with get_db() as conn:
+            # Find a valid (not used, not expired) email_code token for this user
+            token_data = conn.execute(
+                'SELECT * FROM tokens WHERE token = ? AND token_type = ? AND used = 0 AND expires > ? AND user_id = ?',
+                (code, 'email_code', datetime.now(), session['user_id'])
+            ).fetchone()
+            if not token_data:
+                flash('Invalid or expired verification code.', 'error')
+                return render_template('verify-code.html')
+            # Verify the user's password
+            user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+            if not user or not check_password_hash(user['password'], password):
+                flash('Invalid password. Please try again.', 'error')
+                return render_template('verify-code.html')
+            # Mark the token as used and verify the user's email
+            conn.execute('UPDATE tokens SET used = 1 WHERE id = ?', (token_data['id'],))
+            conn.execute('UPDATE users SET email_verified = 1 WHERE id = ?', (session['user_id'],))
+        flash('Email verified successfully! You can now use all features.', 'success')
+        return redirect(url_for('dashboard'))
+    # GET request: show the code verification form
+    return render_template('verify-code.html')
+
+# Route για επαναποστολή verification email
+@app.route('/resend_verification', methods=['POST'])
+def resend_verification():
+    if 'user_id' not in session:
+        return redirect(url_for('signin'))
+    
+    with get_db() as conn:
+        user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+        
+        if user and not user['email_verified']:
+            # Create a new 5‑minute verification code and send it to the user
+            code = create_code(user['id'], 'email_code', expires_minutes=5, conn=conn)
+            email_body = f"""
+            <html>
+            <body>
+                <h2>Email Verification Code</h2>
+                <p>Your new verification code is: <strong>{code}</strong></p>
+                <p>This code is valid for 5 minutes. Please enter it along with your password to verify your account.</p>
+            </body>
+            </html>
+            """
+            
+            if send_email(user['email'], "Email Verification Code - File Upload Server", email_body):
+                flash('A new verification code has been sent!', 'success')
+            else:
+                flash('Error sending verification code. Please try again later.', 'error')
+        else:
+            flash('Email is already verified or user not found.', 'info')
+    
+    # Always redirect to the code verification page so user can enter the new code
+    return redirect(url_for('verify_code'))
 
 @app.route('/request_password_reset', methods=['GET', 'POST'])
 def request_password_reset():
     if request.method == 'POST':
         email = request.form.get('email')
         
-        # Εδώ θα μπορούσατε να προσθέσετε λογική για αποστολή email reset
-        # Για τώρα, απλά εμφανίζουμε ένα μήνυμα
+        with get_db() as conn:
+            user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+            
+            if user:
+                # Δημιουργία token ανάκτησης κωδικού
+                # Use the existing DB connection to avoid nested writes
+                token = create_token(user['id'], 'password_reset', expires_hours=1, conn=conn)  # 1 ώρα ισχύς
+                
+                # Αποστολή email ανάκτησης
+                reset_url = f"{app.config['BASE_URL']}/reset_password/{token}"
+                email_body = f"""
+                <html>
+                <body>
+                    <h2>Password Reset Request</h2>
+                    <p>You requested a password reset. Click the link below to reset your password:</p>
+                    <a href="{reset_url}" style="background-color: #66c7ea; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; display: inline-block;">Reset Password</a>
+                    <p>This link will expire in 1 hour.</p>
+                    <p>If you didn't request this, please ignore this email.</p>
+                </body>
+                </html>
+                """
+                
+                if send_email(email, "Password Reset - File Upload Server", email_body):
+                    flash('If an account with that email exists, a password reset link has been sent.', 'success')
+                else:
+                    flash('Error sending reset email. Please try again later.', 'error')
+            else:
+                # Για ασφάλεια, δεν αποκαλύπτουμε αν το email υπάρχει
+                flash('If an account with that email exists, a password reset link has been sent.', 'success')
         
-        flash('If an account with that email exists, a password reset link has been sent.', 'success')
         return redirect(url_for('signin'))
     
     return render_template('request-password-reset.html')
 
 @app.route('/reset_password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
-    # Αυτό είναι ένα placeholder - θα χρειαστεί πραγματική λογική για token validation
+    # Επαλήθευση του token
+    token_data = verify_token(token, 'password_reset')
+    
+    if not token_data:
+        flash('Invalid or expired reset link.', 'error')
+        return redirect(url_for('request_password_reset'))
+    
     if request.method == 'POST':
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
         
         if password != confirm_password:
             flash('Passwords do not match', 'error')
-            return render_template('reset-password.html')
+            return render_template('reset-password.html', token=token)
         
-        # Εδώ θα μπορούσατε να ενημερώσετε τον κωδικό στη βάση δεδομένων
+        if len(password) < 6:
+            flash('Password must be at least 6 characters long', 'error')
+            return render_template('reset-password.html', token=token)
+        
+        # Ενημέρωση του κωδικού
+        with get_db() as conn:
+            conn.execute(
+                'UPDATE users SET password = ? WHERE id = ?',
+                (generate_password_hash(password), token_data['user_id'])
+            )
+        
         flash('Password has been reset successfully!', 'success')
         return redirect(url_for('signin'))
     
-    return render_template('reset-password.html')
+    return render_template('reset-password.html', token=token)
 
 @app.route('/logout')
 def logout():
@@ -176,7 +493,8 @@ def logout():
     session.clear()
     logger.info(f"Αποσύνδεση - {email}")
     flash('Logged out successfully', 'success')
-    return redirect(url_for('signin'))
+    # Redirect to the sign‑in page and instruct it to show the login form instead of the registration form.
+    return redirect(url_for('signin', show_login=1))
 
 @app.route('/dashboard')
 @app.route('/dashboard/<int:folder_id>')
@@ -472,6 +790,19 @@ def account():
                          total_size=total_size,
                          folder_count=folder_count)
 
+# Middleware για έλεγχο επαλήθευσης email
+@app.before_request
+def check_email_verified():
+    # Permit access to certain routes even if the user has not yet verified their email.  In
+    # addition to static assets and the old verify_email route, allow the code
+    # verification route so the user can enter their code and password.  Also
+    # permit sign‑in, resending codes and logging out.
+    if 'user_id' in session and request.endpoint not in ['static', 'verify_email', 'verify_pending', 'logout', 'signin', 'resend_verification', 'verify_code']:
+        with get_db() as conn:
+            user = conn.execute('SELECT email_verified FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+            if user and not user['email_verified'] and request.endpoint != 'verify_pending':
+                return redirect(url_for('verify_pending'))
+
 if __name__ == '__main__':
     print("=" * 40)
     print("File Server - Εκκίνηση...")
@@ -479,6 +810,9 @@ if __name__ == '__main__':
     print(f"Διεύθυνση: http://localhost:5000")
     print(f"Φάκελος uploads: {app.config['UPLOAD_FOLDER']}")
     print(f"Βάση δεδομένων: {app.config['DATABASE']}")
+    print("=" * 40)
+    print("ΣΗΜΑΝΤΙΚΟ: Ρυθμίστε τα SMTP credentials στο server.py")
+    print("για να λειτουργήσει το σύστημα επαλήθευσης email")
     print("=" * 40)
     
     # Απενεργοποίηση debug messages

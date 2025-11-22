@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enter Verification Code - File Upload Server</title>
+    <!-- Font Awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Main stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="form-container">
+            <div class="title-container">
+                <div class="title-wrapper">
+                    <div class="title-icon">
+                        <i class="fas fa-key"></i>
+                    </div>
+                    <h1 class="title">Verify Account</h1>
+                </div>
+                <p class="subtitle">Enter the verification code sent to your email</p>
+            </div>
+
+            {# Display flash messages (success, error, warning) #}
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">
+                            {% if category == 'success' %}
+                                <i class="fas fa-check"></i>
+                            {% elif category == 'error' %}
+                                <i class="fas fa-times"></i>
+                            {% else %}
+                                <i class="fas fa-exclamation-triangle"></i>
+                            {% endif %}
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form class="form" method="POST" action="{{ url_for('verify_code') }}">
+                <div class="input-group">
+                    <label for="code">Verification Code</label>
+                    <input type="text" name="code" id="code" placeholder="123456" autocomplete="off" inputmode="numeric" required>
+                </div>
+                <!-- Removed password field: verification now only requires the code -->
+                <button type="submit" class="btn-secondary">Verify</button>
+            </form>
+
+            <div class="divider"></div>
+            <div style="text-align: center; margin-top: 1rem;">
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    <i class="fas fa-info-circle"></i> Didn't receive a code?
+                </p>
+                <form method="POST" action="{{ url_for('resend_verification') }}" style="display: inline-block;">
+                    <button type="submit" class="btn-secondary" style="width: auto; padding: 10px 20px;">
+                        <i class="fas fa-redo"></i> Resend Code
+                    </button>
+                </form>
+            </div>
+
+            <div style="text-align: center; margin-top: 2rem;">
+                <a href="{{ url_for('logout') }}" class="btn-secondary" style="display: inline-block; width: auto; padding: 10px 20px;">
+                    <i class="fas fa-sign-out-alt"></i> Sign Out
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
