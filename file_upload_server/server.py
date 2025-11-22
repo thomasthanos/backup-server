@@ -1074,63 +1074,6 @@ def delete_folder(folder_id):
     
     logger.info(f"Διαγραφή φακέλου - {folder['name']}")
     return jsonify({'success': True})
-def cleanup_orphaned_folders():
-    """Διαγράφει φακέλους που έχουν διαγραφεί από τη βάση αλλά παραμένουν στο filesystem"""
-    with get_db() as conn:
-        # Πάρτε όλους τους ενεργούς φακέλους από τη βάση
-        active_folders = conn.execute('SELECT id FROM folders').fetchall()
-        active_folder_ids = {str(folder['id']) for folder in active_folders}
-        
-        # Σαρώστε τον uploads φάκελο
-        uploads_base = app.config['UPLOAD_FOLDER']
-        if os.path.exists(uploads_base):
-            for user_folder in os.listdir(uploads_base):
-                user_path = os.path.join(uploads_base, user_folder)
-                if os.path.isdir(user_path):
-                    # Σαρώστε υποφακέλους
-                    for root, dirs, files in os.walk(user_path):
-                        for dir_name in dirs:
-                            dir_path = os.path.join(root, dir_name)
-                            # Ελέγξτε αν ο φάκελος αντιστοιχεί σε ενεργό folder_id
-                            folder_id_match = None
-                            for active_id in active_folder_ids:
-                                if active_id in dir_path:
-                                    folder_id_match = active_id
-                                    break
-                            
-                            if not folder_id_match:
-                                # Ο φάκελος δεν αντιστοιχεί σε κανέναν ενεργό folder_id
-                                try:
-                                    import shutil
-                                    shutil.rmtree(dir_path)
-                                    logger.info(f"Cleaned up orphaned folder: {dir_path}")
-                                except Exception as e:
-                                    logger.error(f"Error cleaning up {dir_path}: {e}")
-@app.route('/cleanup_orphans')
-def cleanup_orphans():
-    if 'user_id' not in session or session.get('user_id') != ADMIN_ID:
-        return jsonify({'error': 'Not authorized'}), 403
-    
-    cleanup_orphaned_folders()
-    return jsonify({'success': True, 'message': 'Cleanup completed'})
-@app.route('/list_physical_folders')
-def list_physical_folders():
-    if 'user_id' not in session or session.get('user_id') != ADMIN_ID:
-        return jsonify({'error': 'Not authorized'}), 403
-    
-    uploads_base = app.config['UPLOAD_FOLDER']
-    physical_folders = []
-    
-    if os.path.exists(uploads_base):
-        for user_folder in os.listdir(uploads_base):
-            user_path = os.path.join(uploads_base, user_folder)
-            if os.path.isdir(user_path):
-                for root, dirs, files in os.walk(user_path):
-                    for dir_name in dirs:
-                        dir_path = os.path.join(root, dir_name)
-                        physical_folders.append(dir_path)
-    
-    return jsonify({'physical_folders': physical_folders})
 @app.route('/account')
 def account():
     if 'user_id' not in session:
