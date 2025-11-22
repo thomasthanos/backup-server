@@ -98,7 +98,17 @@
                             <span class="table-icon">📁</span>
                             <span class="name-text">{{ folder.name }}</span>
                         </div>
-                        <div class="col-size">—</div>
+                        <div class="col-size">
+                            {% if folder.size >= 1024 * 1024 * 1024 %}
+                                {{ (folder.size / 1024 / 1024 / 1024) | round(2) }} GB
+                            {% elif folder.size >= 1024 * 1024 %}
+                                {{ (folder.size / 1024 / 1024) | round(2) }} MB
+                            {% elif folder.size >= 1024 %}
+                                {{ (folder.size / 1024) | round(2) }} KB
+                            {% else %}
+                                {{ folder.size }} B
+                            {% endif %}
+                        </div>
                         <div class="col-date">{{ folder.created.split(' ')[0] }}</div>
                         <div class="col-actions">
                             <a href="{{ url_for('dashboard', folder_id=folder.id) }}" class="btn-open">

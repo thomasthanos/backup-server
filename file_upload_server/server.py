@@ -19,6 +19,7 @@ from email.mime.multipart import MIMEMultipart
 import uuid
 import random
 import string
+import re
 
 app = Flask(__name__)
 # Use a stable secret key so that session cookies remain valid across restarts.
@@ -200,6 +201,91 @@ def create_code(user_id, token_type, expires_minutes=5, length=6, conn=None):
             )
     return code
 
+# Helper function to construct a relative folder path for a given folder ID.
+#
+# There are two variants provided: one that returns a sanitized path (using
+# ``secure_filename``) and one that returns the raw folder names as stored
+# in the database.  The sanitized version is used when constructing file
+# system paths for uploads to avoid directory traversal issues.  The raw
+# version is used when checking for the existence of directories that may
+# have been created using unsanitized names (older versions of the app).
+
+def get_folder_relative_path(conn, folder_id):
+    """
+    Given a database connection and a folder ID, return the relative path
+    (within a user's base upload directory) representing that folder's
+    location.  Each segment of the path is sanitized with
+    ``secure_filename`` to ensure it is safe for use on the filesystem.
+
+    For example, if there is a folder structure Photos/Vacation and
+    ``folder_id`` corresponds to "Vacation", this will return
+    ``Photos/Vacation``.  If ``folder_id`` is None or invalid, an empty
+    string is returned.
+    """
+    if not folder_id:
+        return ''
+    parts = []
+    current_id = folder_id
+    while current_id:
+        folder = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (current_id,)).fetchone()
+        if not folder:
+            break
+        safe_name = secure_filename(folder['name'])
+        parts.insert(0, safe_name)
+        current_id = folder['parent_id']
+    return os.path.join(*parts) if parts else ''
+
+
+def get_folder_relative_path_raw(conn, folder_id):
+    """
+    Similar to ``get_folder_relative_path``, but returns the raw folder
+    names as stored in the database (without sanitization).  This is used
+    when checking for the existence of directories on disk that may have
+    been created using the original, unsanitized names.  If the folder
+    hierarchy does not exist in the database, an empty string is returned.
+    """
+    if not folder_id:
+        return ''
+    parts = []
+    current_id = folder_id
+    while current_id:
+        folder = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (current_id,)).fetchone()
+        if not folder:
+            break
+        # Prepend the raw folder name to the list
+        parts.insert(0, folder['name'])
+        current_id = folder['parent_id']
+    return os.path.join(*parts) if parts else ''
+
+# Helper function to determine the base upload directory for a user.  This
+# returns a path of the form ``uploads/<sanitized_name>_<id>`` where
+# ``sanitized_name`` is the user's name processed through
+# ``secure_filename``.  Using the user name (plus the user ID to ensure
+# uniqueness) instead of a generic ``user_<id>`` directory provides a
+# more human‑friendly directory structure.  If the user's name cannot be
+# retrieved or sanitizes to an empty string, a fallback of
+# ``user_<id>`` is used.
+def get_user_base_path(conn, user_id):
+    # Retrieve the user's name from the database
+    user = conn.execute('SELECT name FROM users WHERE id = ?', (user_id,)).fetchone()
+    sanitized_name = None
+    if user and user['name']:
+        # Use secure_filename to avoid unsafe characters in directory names
+        sanitized_name = secure_filename(user['name'])
+    base_upload = app.config['UPLOAD_FOLDER']
+    # If we have a sanitized name, construct a directory name using it and
+    # the user ID.  Check if a directory with this name already exists.  If
+    # not, we will fall back to the legacy "user_<id>" naming scheme to
+    # maintain compatibility with existing user folders.
+    if sanitized_name:
+        candidate_name = f"{sanitized_name}_{user_id}"
+        candidate_path = os.path.join(base_upload, candidate_name)
+        if os.path.isdir(candidate_path):
+            return candidate_path
+    # Fallback: legacy directory name
+    legacy_name = f"user_{user_id}"
+    return os.path.join(base_upload, legacy_name)
+
 # Συνάρτηση επαλήθευσης token
 def verify_token(token, token_type):
     with get_db() as conn:
@@ -245,12 +331,12 @@ def signin():
                     <body>
                         <h2>Email Verification Code</h2>
                         <p>Your verification code is: <strong>{code}</strong></p>
-                        <p>This code is valid for 5 minutes. Please enter it along with your password to verify your account.</p>
+                        <p>This code is valid for 5 minutes. Please enter it to verify your account.</p>
                     </body>
                     </html>
                     """
                     send_email(email, "Email Verification Code - File Upload Server", email_body)
-                    flash('A verification code has been sent to your email. Please enter it along with your password to verify your account.', 'success')
+                    flash('A verification code has been sent to your email. Please enter it to verify your account.', 'success')
                     # Store user info in session so that /verify_code can associate the code with the user
                     session['user_id'] = user['id']
                     session['user_email'] = user['email']
@@ -297,7 +383,18 @@ def register():
         conn.execute('INSERT INTO users (email, password, name) VALUES (?, ?, ?)',
                     (email, generate_password_hash(password), name))
         
-        user = conn.execute('SELECT id FROM users WHERE email = ?', (email,)).fetchone()
+        user = conn.execute('SELECT id, name FROM users WHERE email = ?', (email,)).fetchone()
+        # Create a directory for the new user under the uploads folder.  Use
+        # the sanitized user name combined with the user ID to ensure a
+        # human‑friendly yet unique directory, e.g. "john_doe_42".  Fallback
+        # to "user_<id>" if the name cannot be sanitized.
+        sanitized_name = secure_filename(user['name']) if user['name'] else ''
+        if sanitized_name:
+            user_folder_name = f"{sanitized_name}_{user['id']}"
+        else:
+            user_folder_name = f"user_{user['id']}"
+        user_folder_path = os.path.join(app.config['UPLOAD_FOLDER'], user_folder_name)
+        os.makedirs(user_folder_path, exist_ok=True)
         
         # Generate a numeric verification code valid for 5 minutes
         code = create_code(user['id'], 'email_code', expires_minutes=5, conn=conn)
@@ -308,14 +405,14 @@ def register():
         <body>
             <h2>Welcome to File Upload Server!</h2>
             <p>Your verification code is: <strong>{code}</strong></p>
-            <p>This code is valid for 5 minutes. Please enter it along with your password to activate your account.</p>
+            <p>This code is valid for 5 minutes. Please enter it to activate your account.</p>
             <p>If you didn't create an account, you can safely ignore this email.</p>
         </body>
         </html>
         """
         
         if send_email(email, "Verify Your Email - File Upload Server", email_body):
-            flash('Account created successfully! A verification code has been sent to your email. Please enter it along with your password.', 'success')
+            flash('Account created successfully! A verification code has been sent to your email. Please enter it to verify your account.', 'success')
         else:
             flash('Account created successfully! But we could not send the verification code email. Please contact support.', 'warning')
         
@@ -360,20 +457,17 @@ def verify_code():
         return redirect(url_for('signin'))
     if request.method == 'POST':
         code = request.form.get('code', '').strip()
-        password = request.form.get('password', '')
+        # Only verify the code; no password is required.  This allows
+        # users to confirm their email using just the numeric code sent
+        # via email.
         with get_db() as conn:
-            # Find a valid (not used, not expired) email_code token for this user
+            # Find a valid (unused, unexpired) email_code token for this user
             token_data = conn.execute(
                 'SELECT * FROM tokens WHERE token = ? AND token_type = ? AND used = 0 AND expires > ? AND user_id = ?',
                 (code, 'email_code', datetime.now(), session['user_id'])
             ).fetchone()
             if not token_data:
                 flash('Invalid or expired verification code.', 'error')
-                return render_template('verify-code.html')
-            # Verify the user's password
-            user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
-            if not user or not check_password_hash(user['password'], password):
-                flash('Invalid password. Please try again.', 'error')
                 return render_template('verify-code.html')
             # Mark the token as used and verify the user's email
             conn.execute('UPDATE tokens SET used = 1 WHERE id = ?', (token_data['id'],))
@@ -400,7 +494,7 @@ def resend_verification():
             <body>
                 <h2>Email Verification Code</h2>
                 <p>Your new verification code is: <strong>{code}</strong></p>
-                <p>This code is valid for 5 minutes. Please enter it along with your password to verify your account.</p>
+                <p>This code is valid for 5 minutes. Please enter it to verify your account.</p>
             </body>
             </html>
             """
@@ -517,17 +611,93 @@ def dashboard(folder_id=None):
                 # Build breadcrumb trail
                 breadcrumbs = get_breadcrumbs(conn, folder_id)
         
-        # Get folders in current location
-        folders = conn.execute(
+        # Get folders in current location.  We need to ensure that
+        # folders which have been manually deleted on the filesystem do not
+        # appear in the list.  We check both the sanitized and raw
+        # directory names when determining existence.  If neither exists,
+        # the folder record is removed from the database.
+        folder_rows = conn.execute(
             'SELECT * FROM folders WHERE user_id = ? AND parent_id IS ? ORDER BY name',
             (session['user_id'], folder_id)
         ).fetchall()
+        folders = []
+        for row in folder_rows:
+            folder_dict = dict(row)
+            # Determine the base path for the current user.  Use the sanitized
+            # user name combined with the ID for a more readable folder name.
+            user_base = get_user_base_path(conn, session['user_id'])
+            # Build both sanitized and raw relative paths
+            rel_folder_path_safe = get_folder_relative_path(conn, folder_dict['id'])
+            rel_folder_path_raw = get_folder_relative_path_raw(conn, folder_dict['id'])
+            # Determine the physical path of this folder.  Prefer the raw
+            # path if it exists; otherwise fall back to the sanitized path.
+            physical_folder_path = None
+            # Check raw path if available
+            if rel_folder_path_raw:
+                raw_path = os.path.join(user_base, rel_folder_path_raw)
+                if os.path.isdir(raw_path):
+                    physical_folder_path = raw_path
+            # If raw path doesn't exist, check sanitized path
+            if physical_folder_path is None:
+                if rel_folder_path_safe:
+                    safe_path = os.path.join(user_base, rel_folder_path_safe)
+                else:
+                    safe_path = user_base
+                if os.path.isdir(safe_path):
+                    physical_folder_path = safe_path
+            # If neither the raw nor sanitized directory exists, remove the folder record and skip it
+            if physical_folder_path is None:
+                conn.execute('DELETE FROM folders WHERE id = ?', (folder_dict['id'],))
+                continue
+            # Sum the sizes of all files directly in this folder for this user.  Subfolder sizes are not included.
+            size_row = conn.execute(
+                'SELECT SUM(size) as total FROM files WHERE user_id = ? AND folder_id = ?',
+                (session['user_id'], folder_dict['id'])
+            ).fetchone()
+            folder_dict['size'] = size_row['total'] or 0
+            folders.append(folder_dict)
         
-        # Get files in current location
-        files = conn.execute(
+        # Get files in current location.  We will filter out any file
+        # entries whose underlying file is missing from disk.  To handle
+        # inconsistencies between sanitized and raw folder names, attempt
+        # to build both raw and sanitized paths and check which exists.
+        file_rows = conn.execute(
             'SELECT * FROM files WHERE user_id = ? AND folder_id IS ? ORDER BY uploaded DESC',
             (session['user_id'], folder_id)
         ).fetchall()
+        files = []
+        for row in file_rows:
+            file_dict = dict(row)
+            # Determine the base path for the user of this file.  Use sanitized user name.
+            user_base = get_user_base_path(conn, file_dict['user_id'])
+            # Determine relative folder paths (safe and raw) for the file's folder
+            rel_path_safe = ''
+            rel_path_raw = ''
+            if file_dict['folder_id']:
+                rel_path_safe = get_folder_relative_path(conn, file_dict['folder_id'])
+                rel_path_raw = get_folder_relative_path_raw(conn, file_dict['folder_id'])
+            # Build potential physical paths using raw and safe folder names
+            potential_paths = []
+            # Raw path
+            if rel_path_raw:
+                potential_paths.append(os.path.join(user_base, rel_path_raw, file_dict['stored_name']))
+            # Safe path
+            if rel_path_safe:
+                potential_paths.append(os.path.join(user_base, rel_path_safe, file_dict['stored_name']))
+            # Root-level (no folder)
+            if not file_dict['folder_id']:
+                potential_paths.append(os.path.join(user_base, file_dict['stored_name']))
+            # Determine which path actually exists
+            physical_path = None
+            for p in potential_paths:
+                if os.path.isfile(p):
+                    physical_path = p
+                    break
+            # If no candidate path exists, remove the DB entry and skip it
+            if physical_path is None:
+                conn.execute('DELETE FROM files WHERE id = ?', (file_dict['id'],))
+                continue
+            files.append(file_dict)
     
     return render_template('dashboard.html', 
                          files=files, 
@@ -566,11 +736,25 @@ def create_folder():
         parent_id = None
     
     with get_db() as conn:
+        # Insert the new folder record
         conn.execute(
             'INSERT INTO folders (name, user_id, parent_id) VALUES (?, ?, ?)',
             (folder_name, session['user_id'], parent_id)
         )
-    
+        # Compute the physical path where this folder should live.  Determine
+        # the user base directory using the sanitized user name.
+        user_base = get_user_base_path(conn, session['user_id'])
+        # Build the relative path for the parent folder (if any)
+        rel_parent_path = ''
+        if parent_id:
+            rel_parent_path = get_folder_relative_path(conn, parent_id)
+        # Create the new directory inside the user's base path
+        # If rel_parent_path is not empty, join it
+        if rel_parent_path:
+            folder_path = os.path.join(user_base, rel_parent_path, folder_name)
+        else:
+            folder_path = os.path.join(user_base, folder_name)
+        os.makedirs(folder_path, exist_ok=True)
     logger.info(f"Νέος φάκελος - {folder_name}")
     return jsonify({'success': True})
 
@@ -593,23 +777,39 @@ def upload_file():
         filename = secure_filename(file.filename)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         unique_filename = f"{timestamp}_{filename}"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-        
-        file.save(filepath)
-        file_size = os.path.getsize(filepath)
-        
-        if folder_id:
-            folder_id = int(folder_id)
-        else:
-            folder_id = None
-        
+        # We will perform all database operations inside a single context to
+        # avoid nested connections.  This allows us to compute the user's
+        # base directory, resolve the target folder path, and insert the
+        # file metadata in one transaction.
         with get_db() as conn:
+            # Determine the base directory for this user using the sanitized
+            # user name
+            user_base = get_user_base_path(conn, session['user_id'])
+            # Build the relative path for the target folder (if any)
+            rel_path = ''
+            if folder_id:
+                folder_id_int = int(folder_id)
+                rel_path = get_folder_relative_path(conn, folder_id_int)
+                folder_id = folder_id_int
+            else:
+                folder_id = None
+            # Build the final directory path (user base + optional folder path)
+            if rel_path:
+                upload_dir = os.path.join(user_base, rel_path)
+            else:
+                upload_dir = user_base
+            # Ensure directory exists
+            os.makedirs(upload_dir, exist_ok=True)
+            # Save the file to the computed directory
+            filepath = os.path.join(upload_dir, unique_filename)
+            file.save(filepath)
+            file_size = os.path.getsize(filepath)
+            # Insert file metadata into the database
             conn.execute(
                 'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype) VALUES (?, ?, ?, ?, ?, ?)',
                 (filename, unique_filename, session['user_id'], folder_id, file_size, 
                  mimetypes.guess_type(filename)[0] or 'application/octet-stream')
             )
-        
         logger.info(f"Upload επιτυχές - {filename}")
         return jsonify({'success': True})
 
@@ -628,9 +828,33 @@ def download_file(file_id):
         flash('File not found', 'error')
         return redirect(url_for('dashboard'))
     
-    filepath = os.path.join(app.config['UPLOAD_FOLDER'], file_info['stored_name'])
+    # Build possible absolute paths to the requested file using both raw and
+    # sanitized folder names.  We select the first path that exists.  Use
+    # the sanitized user name for the base directory.
+    with get_db() as _conn:
+        user_base = get_user_base_path(_conn, file_info['user_id'])
+    rel_path_safe = ''
+    rel_path_raw = ''
+    if file_info['folder_id']:
+        with get_db() as conn:
+            rel_path_safe = get_folder_relative_path(conn, file_info['folder_id'])
+            rel_path_raw = get_folder_relative_path_raw(conn, file_info['folder_id'])
+    candidate_paths = []
+    if rel_path_raw:
+        candidate_paths.append(os.path.join(user_base, rel_path_raw, file_info['stored_name']))
+    if rel_path_safe:
+        candidate_paths.append(os.path.join(user_base, rel_path_safe, file_info['stored_name']))
+    # Root-level path
+    candidate_paths.append(os.path.join(user_base, file_info['stored_name']))
+    filepath = None
+    for p in candidate_paths:
+        if os.path.isfile(p):
+            filepath = p
+            break
+    if filepath is None:
+        flash('File not found on server', 'error')
+        return redirect(url_for('dashboard'))
     logger.info(f"Download - {file_info['original_name']}")
-    
     return send_file(filepath, as_attachment=True, download_name=file_info['original_name'])
 
 @app.route('/file/<int:file_id>')
@@ -651,18 +875,36 @@ def serve_file(file_id):
     if not file_info:
         flash('File not found', 'error')
         return redirect(url_for('dashboard'))
-    # Build an absolute path to the requested file. Without an absolute
-    # path, Flask may fail to locate the file in different working
-    # directories. If the file is missing, redirect back with an error.
-    rel_path = os.path.join(app.config['UPLOAD_FOLDER'], file_info['stored_name'])
-    filepath = os.path.abspath(rel_path)
-    if not os.path.isfile(filepath):
+    # Build potential absolute paths for the requested file using both raw
+    # and sanitized folder names.  Resolve to the first existing path.
+    # Determine the base directory for this user using the sanitized user name
+    with get_db() as _conn:
+        user_base = get_user_base_path(_conn, file_info['user_id'])
+    rel_path_safe = ''
+    rel_path_raw = ''
+    if file_info['folder_id']:
+        with get_db() as conn:
+            rel_path_safe = get_folder_relative_path(conn, file_info['folder_id'])
+            rel_path_raw = get_folder_relative_path_raw(conn, file_info['folder_id'])
+    candidate_paths = []
+    if rel_path_raw:
+        candidate_paths.append(os.path.abspath(os.path.join(user_base, rel_path_raw, file_info['stored_name'])))
+    if rel_path_safe:
+        candidate_paths.append(os.path.abspath(os.path.join(user_base, rel_path_safe, file_info['stored_name'])))
+    # Root-level path
+    candidate_paths.append(os.path.abspath(os.path.join(user_base, file_info['stored_name'])))
+    abs_path = None
+    for p in candidate_paths:
+        if os.path.isfile(p):
+            abs_path = p
+            break
+    if abs_path is None:
         flash('File not found on server', 'error')
         return redirect(url_for('dashboard'))
-    # Serve the file inline without forcing a download. Avoid specifying
+    # Serve the file inline without forcing a download.  Avoid specifying
     # download_name to maintain compatibility with older Flask versions.
     return send_file(
-        filepath,
+        abs_path,
         as_attachment=False,
         mimetype=file_info['mimetype']
     )
@@ -716,10 +958,32 @@ def delete_file(file_id):
         if not file_info:
             return jsonify({'error': 'File not found'}), 404
         
-        # Delete physical file
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], file_info['stored_name'])
-        if os.path.exists(filepath):
-            os.remove(filepath)
+        # Delete physical file: build possible paths within the user's directory.  We
+        # support both raw and sanitized folder names to handle legacy
+        # directories.
+        # Determine the base directory for this user using the sanitized user name
+        user_base = get_user_base_path(conn, file_info['user_id'])
+        rel_path_safe = ''
+        rel_path_raw = ''
+        if file_info['folder_id']:
+            rel_path_safe = get_folder_relative_path(conn, file_info['folder_id'])
+            rel_path_raw = get_folder_relative_path_raw(conn, file_info['folder_id'])
+        # Build candidate file paths (raw first, then safe, then root)
+        candidate_paths = []
+        if rel_path_raw:
+            candidate_paths.append(os.path.join(user_base, rel_path_raw, file_info['stored_name']))
+        if rel_path_safe:
+            candidate_paths.append(os.path.join(user_base, rel_path_safe, file_info['stored_name']))
+        if not file_info['folder_id']:
+            candidate_paths.append(os.path.join(user_base, file_info['stored_name']))
+        # Remove the first existing candidate
+        for fp in candidate_paths:
+            if os.path.exists(fp):
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+                break
         
         # Remove from database
         conn.execute('DELETE FROM files WHERE id = ?', (file_id,))
@@ -752,8 +1016,34 @@ def delete_folder(folder_id):
         if subfolders['count'] > 0:
             return jsonify({'error': 'Folder must be empty'}), 400
         
+        # Remove the folder record from the database
         conn.execute('DELETE FROM folders WHERE id = ?', (folder_id,))
-    
+        # Remove the physical directory on disk.  We attempt to remove both
+        # raw and sanitized directory names.  Use os.rmdir first; if it fails
+        # because of hidden files (directory not empty), fall back to
+        # shutil.rmtree to force deletion.  Ignore errors if the directory
+        # does not exist.
+        user_base = get_user_base_path(conn, session['user_id'])
+        rel_path_safe = get_folder_relative_path(conn, folder_id)
+        rel_path_raw = get_folder_relative_path_raw(conn, folder_id)
+        candidate_dirs = []
+        if rel_path_raw:
+            candidate_dirs.append(os.path.join(user_base, rel_path_raw))
+        if rel_path_safe:
+            candidate_dirs.append(os.path.join(user_base, rel_path_safe))
+        for d in candidate_dirs:
+            try:
+                os.rmdir(d)
+            except FileNotFoundError:
+                # Directory doesn't exist; nothing to remove
+                continue
+            except OSError:
+                # Directory may contain hidden files; try recursive removal
+                try:
+                    import shutil
+                    shutil.rmtree(d)
+                except Exception:
+                    pass
     logger.info(f"Διαγραφή φακέλου - {folder['name']}")
     return jsonify({'success': True})
 
