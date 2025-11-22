@@ -122,6 +122,7 @@ def ensure_user_folder(user_id, conn):
     user = conn.execute('SELECT id, name FROM users WHERE id = ?', (user_id,)).fetchone()
     if not user:
         return None
+    # ΚΡΑΤΑΜΕ secure_filename() ΓΙΑ USERNAMES
     sanitized_name = secure_filename(user['name']) if user['name'] else ''
     if sanitized_name:
         user_folder_name = f"{sanitized_name}_{user['id']}"
@@ -200,13 +201,16 @@ def get_folder_relative_path(conn, folder_id):
         return ''
     parts = []
     current_id = folder_id
+    
     while current_id:
         folder = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (current_id,)).fetchone()
         if not folder:
             break
-        safe_name = secure_filename(folder['name'])
+        # ΑΦΑΙΡΕΣΗ secure_filename() ΜΟΝΟ ΓΙΑ ΦΑΚΕΛΟΥΣ
+        safe_name = folder['name']
         parts.insert(0, safe_name)
         current_id = folder['parent_id']
+    
     return os.path.join(*parts) if parts else ''
 
 def get_folder_relative_path_raw(conn, folder_id):
@@ -214,19 +218,21 @@ def get_folder_relative_path_raw(conn, folder_id):
         return ''
     parts = []
     current_id = folder_id
+    
     while current_id:
         folder = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (current_id,)).fetchone()
         if not folder:
             break
         parts.insert(0, folder['name'])
         current_id = folder['parent_id']
+    
     return os.path.join(*parts) if parts else ''
 
 def get_user_base_path(conn, user_id):
     user = conn.execute('SELECT name FROM users WHERE id = ?', (user_id,)).fetchone()
     sanitized_name = None
     if user and user['name']:
-        sanitized_name = secure_filename(user['name'])
+        sanitized_name = secure_filename(user['name'])  # ΚΡΑΤΑΜΕ ΓΙΑ USERNAMES
     base_upload = app.config['UPLOAD_FOLDER']
     if sanitized_name:
         candidate_name = f"{sanitized_name}_{user_id}"
