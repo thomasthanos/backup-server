@@ -459,30 +459,53 @@ def resend_verification():
 
 @app.route('/request_password_reset', methods=['GET', 'POST'])
 def request_password_reset():
+    """
+    Handle requests to initiate a password reset. A user must provide their
+    email address. If the account exists and the email has been verified, a
+    password reset link is sent. If the email exists but has not yet been
+    verified, a new verification code is generated and emailed, and the user
+    is directed to the verification page. This prevents unverified accounts
+    from resetting their passwords until they complete email verification.
+    """
     if request.method == 'POST':
         email = request.form.get('email')
-        
+        # Normalize email to lowercase if present
+        if email:
+            email = email.strip().lower()
         with get_db() as conn:
             user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
-            
             if user:
-                token = create_token(user['id'], 'password_reset', expires_hours=1, conn=conn)
-                
-                reset_url = f"{app.config['BASE_URL']}/reset_password/{token}"
-                email_body = render_email_template(
-                    'password_reset.html',
-                    reset_url=reset_url
-                )
-                
-                if send_email(email, "Password Reset - FileCloud Pro", email_body):
-                    flash('If an account with that email exists, a password reset link has been sent.', 'success')
+                # If the email has not been verified, prompt the user to verify
+                if not user['email_verified']:
+                    # Generate a new verification code and send it
+                    code = create_code(user['id'], 'email_code', expires_minutes=5, conn=conn)
+                    email_body = render_email_template(
+                        'verification_code.html',
+                        verification_code=code
+                    )
+                    send_email(email, "Email Verification Code - FileCloud Pro", email_body)
+                    # Set session so the verification page knows which user is verifying
+                    session['user_id'] = user['id']
+                    session['user_email'] = user['email']
+                    flash('You must verify your email before resetting your password. A verification code has been sent.', 'error')
+                    return redirect(url_for('verify_code'))
                 else:
-                    flash('Error sending reset email. Please try again later.', 'error')
+                    # Generate a password reset token valid for 1 hour
+                    token = create_token(user['id'], 'password_reset', expires_hours=1, conn=conn)
+                    reset_url = f"{app.config['BASE_URL']}/reset_password/{token}"
+                    email_body = render_email_template(
+                        'password_reset.html',
+                        reset_url=reset_url
+                    )
+                    if send_email(email, "Password Reset - FileCloud Pro", email_body):
+                        flash('If an account with that email exists and is verified, a password reset link has been sent.', 'success')
+                    else:
+                        flash('Error sending reset email. Please try again later.', 'error')
             else:
-                flash('If an account with that email exists, a password reset link has been sent.', 'success')
-        
+                # Do not reveal whether the email exists for security reasons
+                flash('If an account with that email exists and is verified, a password reset link has been sent.', 'success')
         return redirect(url_for('signin'))
-    
+    # GET request: show the request password reset form
     return render_template('request-password-reset.html')
 
 @app.route('/reset_password/<token>', methods=['GET', 'POST'])
