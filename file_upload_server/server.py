@@ -45,7 +45,10 @@ app.config['SMTP_SERVER'] = 'smtp.gmail.com'
 app.config['SMTP_PORT'] = 587
 app.config['SMTP_USERNAME'] = 'plussd090@gmail.com'
 app.config['SMTP_PASSWORD'] = 'ncchuzjbkkgidnih'
-app.config['BASE_URL'] = 'http://localhost:5000'
+# Base URL used in emails and tokens. When deploying in production, set the
+# FILESERVER_BASE_URL environment variable to your public domain (e.g.,
+# 'https://thomast.uk'). Defaults to localhost for development.
+app.config['BASE_URL'] = os.environ.get('https://thomast.uk', 'http://localhost:5000')
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger()
@@ -1125,7 +1128,7 @@ if __name__ == '__main__':
     print("=" * 40)
     print("File Server - Εκκίνηση...")
     print("=" * 40)
-    print(f"Διεύθυνση: http://localhost:5000")
+    print(f"Διεύθυνση: {app.config['BASE_URL']}")
     print(f"Φάκελος uploads: {app.config['UPLOAD_FOLDER']}")
     print(f"Βάση δεδομένων: {app.config['DATABASE']}")
     print("=" * 40)
