@@ -74,8 +74,6 @@ def init_db():
                 user_id INTEGER NOT NULL,
                 parent_id INTEGER,
                 created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                -- whether the folder is visible to all users. 0 = private, 1 = public
-                is_public BOOLEAN DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (parent_id) REFERENCES folders(id)
             );
@@ -111,20 +109,10 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_tokens_token ON tokens(token);
             CREATE INDEX IF NOT EXISTS idx_tokens_user_type ON tokens(user_id, token_type);
         ''')
-        # Ensure the 'is_public' column exists for both files and folders.  This allows administrators
-        # to make content public so that it is visible to all users.  If the column does not exist,
-        # it is added via an ALTER TABLE statement.  We silently ignore errors since the column may
-        # already exist.
         try:
-            cols_files = [row[1] for row in conn.execute('PRAGMA table_info(files)').fetchall()]
-            if 'is_public' not in cols_files:
+            cols = [row[1] for row in conn.execute('PRAGMA table_info(files)').fetchall()]
+            if 'is_public' not in cols:
                 conn.execute('ALTER TABLE files ADD COLUMN is_public BOOLEAN DEFAULT 0')
-        except Exception:
-            pass
-        try:
-            cols_folders = [row[1] for row in conn.execute('PRAGMA table_info(folders)').fetchall()]
-            if 'is_public' not in cols_folders:
-                conn.execute('ALTER TABLE folders ADD COLUMN is_public BOOLEAN DEFAULT 0')
         except Exception:
             pass
 
@@ -506,31 +494,24 @@ def dashboard(folder_id=None):
     with get_db() as conn:
         current_folder = None
         breadcrumbs = []
-        # When navigating into a folder, allow access if the folder belongs to the current
-        # user or if it has been marked as public.  Without this check, users cannot view
-        # folders created by administrators for sharing.
+        
         if folder_id:
             current_folder = conn.execute(
-                'SELECT * FROM folders WHERE id = ? AND (user_id = ? OR is_public = 1)',
+                'SELECT * FROM folders WHERE id = ? AND user_id = ?',
                 (folder_id, session['user_id'])
             ).fetchone()
+            
             if current_folder:
                 breadcrumbs = get_breadcrumbs(conn, folder_id)
-        # Build the folder list.  Show folders that belong to the current user as well as
-        # any folders that have been marked as public.  This allows users to see shared
-        # folders created by administrators or other users.  Folders are filtered by
-        # parent_id to support nested structures.
+        
         folder_rows = conn.execute(
-            'SELECT * FROM folders WHERE parent_id IS ? AND (user_id = ? OR is_public = 1) ORDER BY name',
-            (folder_id, session['user_id'])
+            'SELECT * FROM folders WHERE user_id = ? AND parent_id IS ? ORDER BY name',
+            (session['user_id'], folder_id)
         ).fetchall()
         folders = []
         for row in folder_rows:
             folder_dict = dict(row)
-            # Determine the base upload path based on the folder owner's user ID.  When
-            # browsing public folders belonging to other users, use the owner’s base path
-            # instead of the current user’s path to locate files on disk.
-            user_base = get_user_base_path(conn, folder_dict['user_id'])
+            user_base = get_user_base_path(conn, session['user_id'])
             rel_folder_path_safe = get_folder_relative_path(conn, folder_dict['id'])
             rel_folder_path_raw = get_folder_relative_path_raw(conn, folder_dict['id'])
             physical_folder_path = None
@@ -545,23 +526,16 @@ def dashboard(folder_id=None):
                     safe_path = user_base
                 if os.path.isdir(safe_path):
                     physical_folder_path = safe_path
-            # If neither safe nor raw paths exist, remove the folder record from the DB and
-            # skip it.
             if physical_folder_path is None:
                 conn.execute('DELETE FROM folders WHERE id = ?', (folder_dict['id'],))
                 continue
-            # Calculate folder size.  We include all files regardless of owner because the
-            # folder might contain public files from other users.  Null total is treated as 0.
             size_row = conn.execute(
-                'SELECT SUM(size) as total FROM files WHERE folder_id = ?',
-                (folder_dict['id'],)
+                'SELECT SUM(size) as total FROM files WHERE user_id = ? AND folder_id = ?',
+                (session['user_id'], folder_dict['id'])
             ).fetchone()
             folder_dict['size'] = size_row['total'] or 0
             folders.append(folder_dict)
-        # Build the file list.  At the root level, show files owned by the current user
-        # as well as any public files that reside at the root.  Within a folder, include
-        # files owned by the current user or files marked as public.  This ensures
-        # shared files are visible to everyone.
+        
         if folder_id is None:
             file_rows = conn.execute(
                 'SELECT * FROM files WHERE ((user_id = ? AND folder_id IS NULL) OR (is_public = 1 AND folder_id IS NULL)) ORDER BY uploaded DESC',
@@ -569,8 +543,8 @@ def dashboard(folder_id=None):
             ).fetchall()
         else:
             file_rows = conn.execute(
-                'SELECT * FROM files WHERE folder_id = ? AND (user_id = ? OR is_public = 1) ORDER BY uploaded DESC',
-                (folder_id, session['user_id'])
+                'SELECT * FROM files WHERE user_id = ? AND folder_id = ? ORDER BY uploaded DESC',
+                (session['user_id'], folder_id)
             ).fetchall()
         files = []
         for row in file_rows:
@@ -636,29 +610,16 @@ def create_folder():
     
     if not folder_name:
         return jsonify({'error': 'Folder name is required'}), 400
-
+    
     if parent_id:
         parent_id = int(parent_id)
     else:
         parent_id = None
-
-    # Determine if the current user is an administrator.  Only administrators are
-    # allowed to create public folders.  Non-admin users cannot set the public
-    # flag when creating a folder.
-    is_public_val = 0
-    is_admin_user = False
-    if session.get('user_id') == ADMIN_ID:
-        is_admin_user = True
-    if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
-        is_admin_user = True
-    if is_admin_user:
-        pub_flag = request.form.get('public') or request.form.get('is_public') or ''
-        if str(pub_flag).lower() in ['1', 'true', 'yes', 'on']:
-            is_public_val = 1
+    
     with get_db() as conn:
         conn.execute(
-            'INSERT INTO folders (name, user_id, parent_id, is_public) VALUES (?, ?, ?, ?)',
-            (folder_name, session['user_id'], parent_id, is_public_val)
+            'INSERT INTO folders (name, user_id, parent_id) VALUES (?, ?, ?)',
+            (folder_name, session['user_id'], parent_id)
         )
         user_base = get_user_base_path(conn, session['user_id'])
         rel_parent_path = ''
@@ -926,46 +887,6 @@ def make_public(file_id):
             return jsonify({'error': 'File not found'}), 404
         conn.execute('UPDATE files SET is_public = 1 WHERE id = ?', (file_id,))
     logger.info(f"File marked as public - ID {file_id}")
-    return jsonify({'success': True})
-
-#
-# Route to mark a folder (and its descendants) as public.  Only administrators can
-# perform this operation.  When a folder is made public, all of its subfolders and
-# contained files are also marked as public so that they are visible to other users.
-#
-@app.route('/make_folder_public/<int:folder_id>', methods=['POST'])
-def make_folder_public(folder_id):
-    if 'user_id' not in session:
-        return jsonify({'error': 'Not authenticated'}), 401
-    # Only administrators can mark a folder as public.
-    is_admin_user = False
-    if session.get('user_id') == ADMIN_ID:
-        is_admin_user = True
-    if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
-        is_admin_user = True
-    if not is_admin_user:
-        return jsonify({'error': 'Not authorized'}), 403
-    with get_db() as conn:
-        folder_info = conn.execute('SELECT * FROM folders WHERE id = ?', (folder_id,)).fetchone()
-        if not folder_info:
-            return jsonify({'error': 'Folder not found'}), 404
-        # Gather all descendant folder IDs, including the selected folder itself.
-        def get_descendant_ids(conn, fid):
-            to_visit = [fid]
-            all_ids = []
-            while to_visit:
-                current = to_visit.pop()
-                all_ids.append(current)
-                child_rows = conn.execute('SELECT id FROM folders WHERE parent_id = ?', (current,)).fetchall()
-                for child in child_rows:
-                    to_visit.append(child['id'])
-            return all_ids
-        all_folder_ids = get_descendant_ids(conn, folder_id)
-        # Mark all folders in the subtree as public.
-        conn.executemany('UPDATE folders SET is_public = 1 WHERE id = ?', [(fid,) for fid in all_folder_ids])
-        # Mark all files contained within these folders as public.
-        conn.executemany('UPDATE files SET is_public = 1 WHERE folder_id = ?', [(fid,) for fid in all_folder_ids])
-    logger.info(f"Folder and descendants marked as public - ID {folder_id}")
     return jsonify({'success': True})
 
 @app.route('/delete/<int:file_id>', methods=['POST'])
