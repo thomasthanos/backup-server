@@ -471,7 +471,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
-
+function makeFolderPublic(folderId) {
+    showConfirm('Are you sure you want to make this folder public? All users will be able to see it.', () => {
+        fetch(`/make_folder_public/${folderId}`, {
+            method: 'POST'
+        })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    const errorMsg = data.error || 'Failed to update folder';
+                    showAlert(errorMsg);
+                }
+            })
+            .catch(error => {
+                console.error('Error making folder public:', error);
+                showAlert('Failed to update folder');
+            });
+    });
+}
 //
 // Public toggle handler
 //

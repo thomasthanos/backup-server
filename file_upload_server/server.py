@@ -503,65 +503,89 @@ def dashboard(folder_id=None):
         breadcrumbs = []
         
         if folder_id:
+            # ΕΠΕΝΔΥΣΗ: Επιτρέψτε πρόσβαση σε δημόσιους φακέλους όλων των χρηστών
             current_folder = conn.execute(
-                'SELECT * FROM folders WHERE id = ? AND user_id = ?',
+                'SELECT * FROM folders WHERE id = ? AND (user_id = ? OR is_public = 1)',
                 (folder_id, session['user_id'])
             ).fetchone()
             
             if current_folder:
                 breadcrumbs = get_breadcrumbs(conn, folder_id)
         
+        # ΕΠΕΝΔΥΣΗ: Εμφάνιση όλων των δημόσιων φακέλων + προσωπικών φακέλων
         folder_rows = conn.execute(
-            'SELECT * FROM folders WHERE (user_id = ? OR is_public = 1) AND parent_id IS ? ORDER BY name',
+            '''SELECT * FROM folders 
+               WHERE (user_id = ? OR is_public = 1) 
+               AND parent_id IS ? 
+               ORDER BY name''',
             (session['user_id'], folder_id)
         ).fetchall()
+        
         folders = []
         for row in folder_rows:
             folder_dict = dict(row)
-            user_base = get_user_base_path(conn, session['user_id'])
+            # Χρησιμοποιήστε το user_id του ιδιοκτήτη του φακέλου
+            folder_owner_id = folder_dict['user_id']
+            user_base = get_user_base_path(conn, folder_owner_id)
+            
             rel_folder_path_safe = get_folder_relative_path(conn, folder_dict['id'])
             rel_folder_path_raw = get_folder_relative_path_raw(conn, folder_dict['id'])
+            
             physical_folder_path = None
             if rel_folder_path_raw:
                 raw_path = os.path.join(user_base, rel_folder_path_raw)
                 if os.path.isdir(raw_path):
                     physical_folder_path = raw_path
-            if physical_folder_path is None:
-                if rel_folder_path_safe:
-                    safe_path = os.path.join(user_base, rel_folder_path_safe)
-                else:
-                    safe_path = user_base
+                    
+            if physical_folder_path is None and rel_folder_path_safe:
+                safe_path = os.path.join(user_base, rel_folder_path_safe)
                 if os.path.isdir(safe_path):
                     physical_folder_path = safe_path
+                    
             if physical_folder_path is None:
+                # Αν ο φάκελος δεν υπάρχει πια, διαγράψτε τον από τη βάση
                 conn.execute('DELETE FROM folders WHERE id = ?', (folder_dict['id'],))
                 continue
+                
+            # Υπολογισμός μεγέθους φακέλου
             size_row = conn.execute(
-                'SELECT SUM(size) as total FROM files WHERE user_id = ? AND folder_id = ?',
-                (session['user_id'], folder_dict['id'])
+                'SELECT SUM(size) as total FROM files WHERE folder_id = ?',
+                (folder_dict['id'],)
             ).fetchone()
             folder_dict['size'] = size_row['total'] or 0
             folders.append(folder_dict)
         
+        # ΕΠΕΝΔΥΣΗ: Εμφάνιση αρχείων από δημόσιους φακέλους άλλων χρηστών
         if folder_id is None:
             file_rows = conn.execute(
-                'SELECT * FROM files WHERE ((user_id = ? AND folder_id IS NULL) OR (is_public = 1 AND folder_id IS NULL)) ORDER BY uploaded DESC',
+                '''SELECT * FROM files 
+                   WHERE (user_id = ? OR is_public = 1) 
+                   AND folder_id IS NULL 
+                   ORDER BY uploaded DESC''',
                 (session['user_id'],)
             ).fetchall()
         else:
             file_rows = conn.execute(
-                'SELECT * FROM files WHERE (user_id = ? OR is_public = 1) AND folder_id = ? ORDER BY uploaded DESC',
+                '''SELECT * FROM files 
+                   WHERE (user_id = ? OR is_public = 1) 
+                   AND folder_id = ? 
+                   ORDER BY uploaded DESC''',
                 (session['user_id'], folder_id)
             ).fetchall()
+            
         files = []
         for row in file_rows:
             file_dict = dict(row)
-            user_base = get_user_base_path(conn, file_dict['user_id'])
+            # Χρησιμοποιήστε το user_id του ιδιοκτήτη του αρχείου
+            file_owner_id = file_dict['user_id']
+            user_base = get_user_base_path(conn, file_owner_id)
+            
             rel_path_safe = ''
             rel_path_raw = ''
             if file_dict['folder_id']:
                 rel_path_safe = get_folder_relative_path(conn, file_dict['folder_id'])
                 rel_path_raw = get_folder_relative_path_raw(conn, file_dict['folder_id'])
+                
             potential_paths = []
             if rel_path_raw:
                 potential_paths.append(os.path.join(user_base, rel_path_raw, file_dict['stored_name']))
@@ -569,14 +593,17 @@ def dashboard(folder_id=None):
                 potential_paths.append(os.path.join(user_base, rel_path_safe, file_dict['stored_name']))
             if not file_dict['folder_id']:
                 potential_paths.append(os.path.join(user_base, file_dict['stored_name']))
+                
             physical_path = None
             for p in potential_paths:
                 if os.path.isfile(p):
                     physical_path = p
                     break
+                    
             if physical_path is None:
                 conn.execute('DELETE FROM files WHERE id = ?', (file_dict['id'],))
                 continue
+                
             files.append(file_dict)
     
     is_admin = False
@@ -584,6 +611,7 @@ def dashboard(folder_id=None):
         is_admin = True
     if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
         is_admin = True
+        
     current_user_id = session.get('user_id')
     return render_template('dashboard.html', 
                          files=files, 
@@ -900,18 +928,24 @@ def make_public(file_id):
 def make_folder_public(folder_id):
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
+        
+    # Μόνο ο admin μπορεί να κάνει φακέλους δημόσιους
     is_admin_user = False
     if session.get('user_id') == ADMIN_ID:
         is_admin_user = True
     if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
         is_admin_user = True
+        
     if not is_admin_user:
         return jsonify({'error': 'Not authorized'}), 403
+        
     with get_db() as conn:
         folder_info = conn.execute('SELECT * FROM folders WHERE id = ?', (folder_id,)).fetchone()
         if not folder_info:
             return jsonify({'error': 'Folder not found'}), 404
+            
         conn.execute('UPDATE folders SET is_public = 1 WHERE id = ?', (folder_id,))
+        
     logger.info(f"Folder marked as public - ID {folder_id}")
     return jsonify({'success': True})
 
