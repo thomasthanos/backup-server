@@ -521,6 +521,15 @@ def dashboard(folder_id=None):
             (session['user_id'], folder_id)
         ).fetchall()
         
+        # DEBUG: Log public folders
+        public_folders = conn.execute(
+            'SELECT id, name, user_id, is_public FROM folders WHERE is_public = 1'
+        ).fetchall()
+        
+        logger.info(f"DEBUG: Found {len(public_folders)} public folders:")
+        for folder in public_folders:
+            logger.info(f"DEBUG: Public Folder - ID: {folder['id']}, Name: {folder['name']}, Owner: {folder['user_id']}")
+        
         folders = []
         for row in folder_rows:
             folder_dict = dict(row)
@@ -613,6 +622,13 @@ def dashboard(folder_id=None):
         is_admin = True
         
     current_user_id = session.get('user_id')
+    
+    # DEBUG: Log what we're sending to template
+    logger.info(f"DEBUG: Rendering dashboard for user {session['user_id']}")
+    logger.info(f"DEBUG: Folders count: {len(folders)}")
+    logger.info(f"DEBUG: Files count: {len(files)}")
+    logger.info(f"DEBUG: Is admin: {is_admin}")
+    
     return render_template('dashboard.html', 
                          files=files, 
                          folders=folders,
@@ -945,6 +961,10 @@ def make_folder_public(folder_id):
             return jsonify({'error': 'Folder not found'}), 404
             
         conn.execute('UPDATE folders SET is_public = 1 WHERE id = ?', (folder_id,))
+        
+        # DEBUG: Verify the update worked
+        updated_folder = conn.execute('SELECT * FROM folders WHERE id = ?', (folder_id,)).fetchone()
+        logger.info(f"DEBUG: Folder {folder_id} is_public after update: {updated_folder['is_public']}")
         
     logger.info(f"Folder marked as public - ID {folder_id}")
     return jsonify({'success': True})
