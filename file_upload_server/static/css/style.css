@@ -1588,3 +1588,50 @@ body {
         font-size: 1.75rem;
     }
 }
+/* Public toggle styling */
+.public-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    color: var(--text-primary);
+}
+
+.public-toggle input[type="checkbox"] {
+    /* κρύβει το default κουτάκι */
+    appearance: none;
+    width: 42px;
+    height: 22px;
+    border-radius: 12px;
+    background: var(--bg-tertiary);
+    position: relative;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.3s ease;
+}
+
+.public-toggle input[type="checkbox"]::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 3px;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--primary);
+    transition: left 0.3s ease, background 0.3s ease;
+}
+
+.public-toggle input[type="checkbox"]:checked {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+}
+
+.public-toggle input[type="checkbox"]:checked::before {
+    left: 23px;
+    background: var(--accent);
+}
+
+.public-toggle label {
+    cursor: pointer;
+}
