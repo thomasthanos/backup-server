@@ -137,7 +137,7 @@
                             </button>
                             {% endif %}
                             {% if is_admin and not folder.is_public %}
-                            <button onclick="if (window.makeFolderPublic){ window.makeFolderPublic('{{ folder.id }}'); }" class="btn-make-public-folder">
+                            <button onclick="makeFolderPublic('{{ folder.id }}')" class="btn-make-public-folder">
                                 <span class="action-icon">🌍</span>
                                 <span class="action-text">Public</span>
                             </button>

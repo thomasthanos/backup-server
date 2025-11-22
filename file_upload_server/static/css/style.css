@@ -690,6 +690,22 @@ body {
     filter: brightness(0.9);
 }
 
+/* Button for making a folder public (reuse the styling of the file public button) */
+.btn-make-public-folder {
+    background: linear-gradient(135deg, var(--success), var(--primary));
+    color: white;
+}
+.btn-make-public-folder:hover {
+    filter: brightness(0.9);
+}
+
+/* Small globe indicator shown next to public files or folders */
+.public-indicator {
+    margin-left: 6px;
+    font-size: 16px;
+    vertical-align: middle;
+}
+
 /* Icon and text styling within buttons */
 .action-icon {
     font-size: 18px;
