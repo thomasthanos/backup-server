@@ -1603,7 +1603,7 @@ body {
     width: 42px;
     height: 22px;
     border-radius: 12px;
-    background: var(--bg-tertiary);
+    background: #232e4d;
     position: relative;
     cursor: pointer;
     outline: none;
