@@ -471,6 +471,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+// Event delegation για τα κουμπιά makeFolderPublic
+document.addEventListener('DOMContentLoaded', function () {
+    document.body.addEventListener('click', function (e) {
+        if (e.target.closest('.btn-make-folder-public')) {
+            const folderId = e.target.closest('.btn-make-folder-public').getAttribute('data-folder-id');
+            if (folderId) {
+                makeFolderPublic(folderId);
+            }
+        }
+    });
+});
+/**
+ * Make a folder public (admin only)
+ * @param {string} folderId - The ID of the folder to make public
+ */
 function makeFolderPublic(folderId) {
     showConfirm('Are you sure you want to make this folder public? All users will be able to see it.', () => {
         fetch(`/make_folder_public/${folderId}`, {
@@ -481,16 +496,16 @@ function makeFolderPublic(folderId) {
                 if (data.success) {
                     window.location.reload();
                 } else {
-                    const errorMsg = data.error || 'Failed to update folder';
-                    showAlert(errorMsg);
+                    showAlert('Failed: ' + (data.error || 'Unknown error'));
                 }
             })
             .catch(error => {
-                console.error('Error making folder public:', error);
-                showAlert('Failed to update folder');
+                console.error('Error:', error);
+                showAlert('Failed to make folder public');
             });
     });
 }
+
 //
 // Public toggle handler
 //

@@ -117,7 +117,7 @@
                                 <span class="action-text">Open</span>
                             </a>
                             {% if is_admin and not folder.is_public %}
-                            <button onclick="makeFolderPublic('{{ folder.id }}')" class="btn-make-public">
+                            <button class="btn-make-folder-public" data-folder-id="{{ folder.id }}">
                                 <span class="action-icon">🌍</span>
                                 <span class="action-text">Make Public</span>
                             </button>
@@ -246,14 +246,21 @@
     </div>
 
     <script>
-        // Pass the current folder's ID to JavaScript in a way that doesn't confuse linters or TypeScript.
-        // We render the ID as a string via Jinja and then parse it in JavaScript. If there is no current
-        // folder, the string will be empty and we fall back to null.
+        // Pass the current folder's ID to JavaScript
         const currentFolderId = (() => {
             const idStr = "{{ current_folder.id if current_folder else '' }}";
             return idStr ? parseInt(idStr) : null;
         })();
+        
+        // Προσθήκη debug information
+        console.log('Dashboard loaded successfully');
+        console.log('makeFolderPublic function defined:', typeof makeFolderPublic);
     </script>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+    // Clear cache και φόρτωση script
+    const script = document.createElement('script');
+    script.src = "{{ url_for('static', filename='js/main.js') }}?v=" + Date.now();
+    document.body.appendChild(script);
+</script>
 </body>
 </html>
