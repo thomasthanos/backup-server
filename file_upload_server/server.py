@@ -122,8 +122,7 @@ def ensure_user_folder(user_id, conn):
     user = conn.execute('SELECT id, name FROM users WHERE id = ?', (user_id,)).fetchone()
     if not user:
         return None
-    # ΑΠΟΣΥΝΔΕΣΗ secure_filename() - ΧΡΗΣΗ ΑΠΕΥΘΕΙΑΣ ΤΟΥ ΟΝΟΜΑΤΟΣ
-    sanitized_name = user['name'] if user['name'] else ''
+    sanitized_name = secure_filename(user['name']) if user['name'] else ''
     if sanitized_name:
         user_folder_name = f"{sanitized_name}_{user['id']}"
     else:
@@ -201,16 +200,13 @@ def get_folder_relative_path(conn, folder_id):
         return ''
     parts = []
     current_id = folder_id
-    
     while current_id:
         folder = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (current_id,)).fetchone()
         if not folder:
             break
-        # ΑΠΟΣΥΝΔΕΣΗ secure_filename() - ΧΡΗΣΗ ΑΠΕΥΘΕΙΑΣ ΤΟΥ ΟΝΟΜΑΤΟΣ
-        safe_name = folder['name']
+        safe_name = secure_filename(folder['name'])
         parts.insert(0, safe_name)
         current_id = folder['parent_id']
-    
     return os.path.join(*parts) if parts else ''
 
 def get_folder_relative_path_raw(conn, folder_id):
@@ -218,21 +214,19 @@ def get_folder_relative_path_raw(conn, folder_id):
         return ''
     parts = []
     current_id = folder_id
-    
     while current_id:
         folder = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (current_id,)).fetchone()
         if not folder:
             break
         parts.insert(0, folder['name'])
         current_id = folder['parent_id']
-    
     return os.path.join(*parts) if parts else ''
 
 def get_user_base_path(conn, user_id):
     user = conn.execute('SELECT name FROM users WHERE id = ?', (user_id,)).fetchone()
     sanitized_name = None
     if user and user['name']:
-        sanitized_name = user['name']  # ΑΠΟΣΥΝΔΕΣΗ secure_filename()
+        sanitized_name = secure_filename(user['name'])
     base_upload = app.config['UPLOAD_FOLDER']
     if sanitized_name:
         candidate_name = f"{sanitized_name}_{user_id}"
@@ -617,15 +611,6 @@ def create_folder():
         parent_id = None
     
     with get_db() as conn:
-        # Έλεγχος αν ο φάκελος υπάρχει ήδη
-        existing = conn.execute(
-            'SELECT id FROM folders WHERE name = ? AND user_id = ? AND parent_id IS ?',
-            (folder_name, session['user_id'], parent_id)
-        ).fetchone()
-        
-        if existing:
-            return jsonify({'error': 'Folder with this name already exists'}), 400
-        
         conn.execute(
             'INSERT INTO folders (name, user_id, parent_id) VALUES (?, ?, ?)',
             (folder_name, session['user_id'], parent_id)
@@ -668,14 +653,6 @@ def upload_file():
         if folder_id_raw:
             try:
                 folder_id_val = int(folder_id_raw)
-                # Έλεγχος ότι ο φάκελος ανήκει στον χρήστη
-                with get_db() as conn:
-                    folder_check = conn.execute(
-                        'SELECT id FROM folders WHERE id = ? AND user_id = ?', 
-                        (folder_id_val, session['user_id'])
-                    ).fetchone()
-                    if not folder_check:
-                        return jsonify({'error': 'Folder not found or access denied'}), 400
             except ValueError:
                 return jsonify({'error': 'Invalid folder ID'}), 400
         temp_dir = os.path.join(app.config['CHUNK_TEMP_FOLDER'], f"{session['user_id']}_{upload_id}")
@@ -750,13 +727,6 @@ def upload_file():
         if folder_id:
             try:
                 folder_id_int = int(folder_id)
-                # Έλεγχος ότι ο φάκελος ανήκει στον χρήστη
-                folder_check = conn.execute(
-                    'SELECT id FROM folders WHERE id = ? AND user_id = ?', 
-                    (folder_id_int, session['user_id'])
-                ).fetchone()
-                if not folder_check:
-                    return jsonify({'error': 'Folder not found or access denied'}), 400
                 rel_path = get_folder_relative_path(conn, folder_id_int)
             except ValueError:
                 return jsonify({'error': 'Invalid folder ID'}), 400
@@ -942,19 +912,13 @@ def delete_file(file_id):
             candidate_paths.append(os.path.join(user_base, rel_path_safe, file_info['stored_name']))
         if not file_info['folder_id']:
             candidate_paths.append(os.path.join(user_base, file_info['stored_name']))
-        file_deleted = False
         for fp in candidate_paths:
             if os.path.exists(fp):
                 try:
                     os.remove(fp)
-                    file_deleted = True
-                    break
-                except Exception as e:
-                    print(f"Error deleting file {fp}: {e}")
-                    continue
-        
-        if not file_deleted:
-            print(f"Warning: File not found physically for deletion: {file_info['stored_name']}")
+                except Exception:
+                    pass
+                break
         
         conn.execute('DELETE FROM files WHERE id = ?', (file_id,))
     
@@ -983,39 +947,26 @@ def delete_folder(folder_id):
         if subfolders['count'] > 0:
             return jsonify({'error': 'Folder must be empty'}), 400
         
+        conn.execute('DELETE FROM folders WHERE id = ?', (folder_id,))
         user_base = get_user_base_path(conn, session['user_id'])
         rel_path_safe = get_folder_relative_path(conn, folder_id)
         rel_path_raw = get_folder_relative_path_raw(conn, folder_id)
-        
         candidate_dirs = []
         if rel_path_raw:
             candidate_dirs.append(os.path.join(user_base, rel_path_raw))
         if rel_path_safe:
             candidate_dirs.append(os.path.join(user_base, rel_path_safe))
-        
-        folder_deleted = False
         for d in candidate_dirs:
-            if os.path.exists(d):
+            try:
+                os.rmdir(d)
+            except FileNotFoundError:
+                continue
+            except OSError:
                 try:
-                    os.rmdir(d)
-                    folder_deleted = True
-                    break
-                except OSError as e:
-                    print(f"Error deleting directory {d}: {e}")
-                    try:
-                        import shutil
-                        shutil.rmtree(d)
-                        folder_deleted = True
-                        break
-                    except Exception as e2:
-                        print(f"Error force-deleting directory {d}: {e2}")
-                        continue
-        
-        if not folder_deleted:
-            print(f"Warning: Folder not found physically for deletion: {folder['name']}")
-        
-        conn.execute('DELETE FROM folders WHERE id = ?', (folder_id,))
-    
+                    import shutil
+                    shutil.rmtree(d)
+                except Exception:
+                    pass
     logger.info(f"Διαγραφή φακέλου - {folder['name']}")
     return jsonify({'success': True})
 
