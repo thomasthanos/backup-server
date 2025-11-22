@@ -445,11 +445,7 @@ def verify_email(token):
         flash('Invalid or expired verification link.', 'error')
         return redirect(url_for('signin'))
 
-# Route for verifying a numeric code sent via email.  When a user registers
-# or attempts to sign in without a verified email, a short‑lived code is
-# generated and emailed to them.  This route presents a form where the
-# user can enter the code and their account password.  If both the code
-# and password match, the user's email is marked as verified.
+
 @app.route('/verify_code', methods=['GET', 'POST'])
 def verify_code():
     # User must be logged in (via session) to verify their code
