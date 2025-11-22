@@ -74,6 +74,7 @@ def init_db():
                 user_id INTEGER NOT NULL,
                 parent_id INTEGER,
                 created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_public BOOLEAN DEFAULT 0,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (parent_id) REFERENCES folders(id)
             );
@@ -113,6 +114,12 @@ def init_db():
             cols = [row[1] for row in conn.execute('PRAGMA table_info(files)').fetchall()]
             if 'is_public' not in cols:
                 conn.execute('ALTER TABLE files ADD COLUMN is_public BOOLEAN DEFAULT 0')
+        except Exception:
+            pass
+        try:
+            cols = [row[1] for row in conn.execute('PRAGMA table_info(folders)').fetchall()]
+            if 'is_public' not in cols:
+                conn.execute('ALTER TABLE folders ADD COLUMN is_public BOOLEAN DEFAULT 0')
         except Exception:
             pass
 
@@ -505,7 +512,7 @@ def dashboard(folder_id=None):
                 breadcrumbs = get_breadcrumbs(conn, folder_id)
         
         folder_rows = conn.execute(
-            'SELECT * FROM folders WHERE user_id = ? AND parent_id IS ? ORDER BY name',
+            'SELECT * FROM folders WHERE (user_id = ? OR is_public = 1) AND parent_id IS ? ORDER BY name',
             (session['user_id'], folder_id)
         ).fetchall()
         folders = []
@@ -543,7 +550,7 @@ def dashboard(folder_id=None):
             ).fetchall()
         else:
             file_rows = conn.execute(
-                'SELECT * FROM files WHERE user_id = ? AND folder_id = ? ORDER BY uploaded DESC',
+                'SELECT * FROM files WHERE (user_id = ? OR is_public = 1) AND folder_id = ? ORDER BY uploaded DESC',
                 (session['user_id'], folder_id)
             ).fetchall()
         files = []
@@ -887,6 +894,25 @@ def make_public(file_id):
             return jsonify({'error': 'File not found'}), 404
         conn.execute('UPDATE files SET is_public = 1 WHERE id = ?', (file_id,))
     logger.info(f"File marked as public - ID {file_id}")
+    return jsonify({'success': True})
+
+@app.route('/make_folder_public/<int:folder_id>', methods=['POST'])
+def make_folder_public(folder_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not authenticated'}), 401
+    is_admin_user = False
+    if session.get('user_id') == ADMIN_ID:
+        is_admin_user = True
+    if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
+        is_admin_user = True
+    if not is_admin_user:
+        return jsonify({'error': 'Not authorized'}), 403
+    with get_db() as conn:
+        folder_info = conn.execute('SELECT * FROM folders WHERE id = ?', (folder_id,)).fetchone()
+        if not folder_info:
+            return jsonify({'error': 'Folder not found'}), 404
+        conn.execute('UPDATE folders SET is_public = 1 WHERE id = ?', (folder_id,))
+    logger.info(f"Folder marked as public - ID {folder_id}")
     return jsonify({'success': True})
 
 @app.route('/delete/<int:file_id>', methods=['POST'])
