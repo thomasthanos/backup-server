@@ -99,21 +99,32 @@ if (uploadArea) {
 }
 
 function handleFileUpload(file) {
+    // Determine whether to perform a normal upload or a chunked upload.
+    // Cloudflare (and similar proxies) impose a hard limit on request sizes (e.g., 100 MB).
+    // If the file exceeds a configurable threshold, upload it in smaller chunks
+    // so that each request stays under the limit. Once all chunks have been
+    // uploaded, the server assembles them into the final file.
+
+    const MAX_CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk; safely below the 100 MB proxy limit
+
+    // Use chunked upload if the file exceeds our chunk size
+    if (file.size > MAX_CHUNK_SIZE) {
+        uploadLargeFile(file, MAX_CHUNK_SIZE);
+        return;
+    }
+
+    // Otherwise, proceed with a standard single request upload
     const formData = new FormData();
     formData.append('file', file);
-    
     // Add folder_id if we're inside a folder
     if (typeof currentFolderId !== 'undefined' && currentFolderId !== null) {
         formData.append('folder_id', currentFolderId);
     }
-
     // Show progress
     progressContainer.style.display = 'block';
     progressFill.style.width = '0%';
     progressText.textContent = 'Uploading...';
-
     const xhr = new XMLHttpRequest();
-
     // Progress tracking
     xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
@@ -122,36 +133,102 @@ function handleFileUpload(file) {
             progressText.textContent = `Uploading: ${Math.round(percentComplete)}%`;
         }
     });
-
     // Upload complete
     xhr.addEventListener('load', () => {
         if (xhr.status === 200) {
-            const response = JSON.parse(xhr.responseText);
             progressText.textContent = 'Upload complete! Refreshing...';
             progressFill.style.width = '100%';
-            
             setTimeout(() => {
                 window.location.reload();
             }, 1000);
         } else {
             progressText.textContent = 'Upload failed!';
             progressFill.style.width = '0%';
-            // Use custom alert modal instead of native alert
             showAlert('Upload failed. Please try again.');
             progressContainer.style.display = 'none';
         }
     });
-
     // Error handling
     xhr.addEventListener('error', () => {
         progressText.textContent = 'Upload failed!';
-        // Use custom alert modal instead of native alert
         showAlert('Upload failed. Please check your connection.');
         progressContainer.style.display = 'none';
     });
-
     xhr.open('POST', '/upload');
     xhr.send(formData);
+}
+
+/**
+ * Upload a file in multiple chunks. Each chunk is sent sequentially to
+ * the server via the /upload endpoint with metadata describing its
+ * position within the sequence. After the last chunk uploads, the
+ * server assembles them into a final file. Progress is displayed
+ * proportionally to the number of chunks completed.
+ *
+ * @param {File} file - The file to upload.
+ * @param {number} chunkSize - The maximum size of each chunk in bytes.
+ */
+function uploadLargeFile(file, chunkSize) {
+    const totalChunks = Math.ceil(file.size / chunkSize);
+    const uploadId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    let currentChunk = 0;
+    // Show progress bar for chunked uploads
+    progressContainer.style.display = 'block';
+    progressFill.style.width = '0%';
+    progressText.textContent = 'Uploading...';
+    /**
+     * Upload the next chunk. This function is called recursively until all
+     * chunks have been sent. On completion of the final chunk, the page
+     * refreshes to show the newly uploaded file.
+     */
+    function uploadNextChunk() {
+        const start = currentChunk * chunkSize;
+        const end = Math.min(start + chunkSize, file.size);
+        const blob = file.slice(start, end);
+        const formData = new FormData();
+        formData.append('file', blob);
+        formData.append('chunk_index', currentChunk);
+        formData.append('total_chunks', totalChunks);
+        formData.append('file_name', file.name);
+        formData.append('upload_id', uploadId);
+        // Add folder_id if we're inside a folder
+        if (typeof currentFolderId !== 'undefined' && currentFolderId !== null) {
+            formData.append('folder_id', currentFolderId);
+        }
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/upload');
+        xhr.onload = function () {
+            if (xhr.status === 200) {
+                currentChunk++;
+                // Update progress based on chunks completed
+                const percent = (currentChunk / totalChunks) * 100;
+                progressFill.style.width = percent + '%';
+                progressText.textContent = `Uploading: ${Math.round(percent)}%`;
+                if (currentChunk < totalChunks) {
+                    uploadNextChunk();
+                } else {
+                    // All chunks uploaded, refresh page after brief delay
+                    progressText.textContent = 'Upload complete! Refreshing...';
+                    progressFill.style.width = '100%';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                }
+            } else {
+                progressText.textContent = 'Upload failed!';
+                progressFill.style.width = '0%';
+                showAlert('Upload failed. Please try again.');
+                progressContainer.style.display = 'none';
+            }
+        };
+        xhr.onerror = function () {
+            progressText.textContent = 'Upload failed!';
+            showAlert('Upload failed. Please check your connection.');
+            progressContainer.style.display = 'none';
+        };
+        xhr.send(formData);
+    }
+    uploadNextChunk();
 }
 
 // Create folder handler

@@ -20,6 +20,14 @@ app = Flask(__name__)
 app.secret_key = 'a1b2c3d4e5f6g7h8i9j0'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = None
+
+# Temporary folder for storing chunked upload parts. When a large file is
+# uploaded in pieces (to work around upstream request/response limits),
+# each part will be stored in a subdirectory under this folder using a
+# unique identifier. Once all parts arrive, they will be assembled into
+# a single file and this temporary folder will be cleaned up.  This
+# directory lives alongside the main upload folder.
+app.config['CHUNK_TEMP_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_chunks')
 app.config['DATABASE'] = 'data/fileserver.db'
 
 app.config['SMTP_SERVER'] = 'smtp.gmail.com'
@@ -37,6 +45,7 @@ logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs('data', exist_ok=True)
+os.makedirs(app.config['CHUNK_TEMP_FOLDER'], exist_ok=True)
 
 @contextmanager
 def get_db():
@@ -633,43 +642,129 @@ def upload_file():
         logger.info("Upload αποτυχία - Μη συνδεδεμένος")
         return jsonify({'error': 'Not authenticated'}), 401
     
+    # Ensure a file is provided in the request. Even for chunked uploads,
+    # the part is expected to be sent as a file field.
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
-    
-    file = request.files['file']
+
+    file_part = request.files['file']
+    # Distinguish between normal uploads and chunked uploads. For chunked
+    # uploads, the client must provide the following fields in the form
+    # data: 'chunk_index', 'total_chunks', 'file_name', and 'upload_id'.
+    # Optionally, it can provide 'folder_id' to indicate the folder to
+    # store the final assembled file.  The chunk_index should be
+    # zero‑based and total_chunks is the total number of parts.
+    if request.form.get('chunk_index') is not None and request.form.get('total_chunks') is not None and request.form.get('file_name') and request.form.get('upload_id'):
+        try:
+            chunk_index = int(request.form['chunk_index'])
+            total_chunks = int(request.form['total_chunks'])
+        except ValueError:
+            return jsonify({'error': 'Invalid chunk indices'}), 400
+
+        # Validate indices
+        if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
+            return jsonify({'error': 'Invalid chunk indices'}), 400
+        original_filename = secure_filename(request.form['file_name'])
+        upload_id = secure_filename(request.form['upload_id'])
+        folder_id_raw = request.form.get('folder_id')
+        folder_id_val = None
+        if folder_id_raw:
+            try:
+                folder_id_val = int(folder_id_raw)
+            except ValueError:
+                return jsonify({'error': 'Invalid folder ID'}), 400
+        # Create the temporary directory for this upload ID
+        temp_dir = os.path.join(app.config['CHUNK_TEMP_FOLDER'], f"{session['user_id']}_{upload_id}")
+        os.makedirs(temp_dir, exist_ok=True)
+        # Save the current chunk
+        part_path = os.path.join(temp_dir, f"part_{chunk_index:06d}")
+        file_part.save(part_path)
+        # If this is the last chunk, assemble the file
+        if chunk_index == total_chunks - 1:
+            # Ensure that all parts are present
+            part_files = []
+            for i in range(total_chunks):
+                expected_path = os.path.join(temp_dir, f"part_{i:06d}")
+                if not os.path.exists(expected_path):
+                    return jsonify({'error': 'Missing chunks for assembly'}), 400
+                part_files.append(expected_path)
+            # Determine the user's base upload directory
+            with get_db() as conn:
+                user_base = get_user_base_path(conn, session['user_id'])
+                rel_path = ''
+                if folder_id_val is not None:
+                    rel_path = get_folder_relative_path(conn, folder_id_val)
+                if rel_path:
+                    final_dir = os.path.join(user_base, rel_path)
+                else:
+                    final_dir = user_base
+                os.makedirs(final_dir, exist_ok=True)
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                unique_filename = f"{timestamp}_{original_filename}"
+                final_path = os.path.join(final_dir, unique_filename)
+                # Assemble the final file by concatenating chunks
+                with open(final_path, 'wb') as outfile:
+                    total_size = 0
+                    for part_file in sorted(part_files):
+                        with open(part_file, 'rb') as infile:
+                            data = infile.read()
+                            outfile.write(data)
+                            total_size += len(data)
+                # Remove temporary parts and directory
+                for part_file in part_files:
+                    try:
+                        os.remove(part_file)
+                    except OSError:
+                        pass
+                try:
+                    os.rmdir(temp_dir)
+                except OSError:
+                    pass
+                # Insert file record into the database
+                conn.execute(
+                    'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype) VALUES (?, ?, ?, ?, ?, ?)',
+                    (original_filename, unique_filename, session['user_id'], folder_id_val, total_size, mimetypes.guess_type(original_filename)[0] or 'application/octet-stream')
+                )
+            logger.info(f"Chunked upload assembled - {original_filename}")
+            return jsonify({'success': True, 'assembled': True})
+        else:
+            # Not the last chunk, return partial success
+            return jsonify({'success': True, 'assembled': False})
+
+    # Fallback: handle normal (non‑chunked) uploads
     folder_id = request.form.get('folder_id')
-    
-    if file.filename == '':
+    # Extract original filename (it may be blank if not provided)
+    filename = secure_filename(file_part.filename)
+    if filename == '':
         return jsonify({'error': 'No selected file'}), 400
-    
-    if file:
-        filename = secure_filename(file.filename)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        unique_filename = f"{timestamp}_{filename}"
-        with get_db() as conn:
-            user_base = get_user_base_path(conn, session['user_id'])
-            rel_path = ''
-            if folder_id:
+    # Build a unique file name to avoid collisions
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    unique_filename = f"{timestamp}_{filename}"
+    with get_db() as conn:
+        user_base = get_user_base_path(conn, session['user_id'])
+        rel_path = ''
+        folder_id_int = None
+        if folder_id:
+            try:
                 folder_id_int = int(folder_id)
                 rel_path = get_folder_relative_path(conn, folder_id_int)
-                folder_id = folder_id_int
-            else:
-                folder_id = None
-            if rel_path:
-                upload_dir = os.path.join(user_base, rel_path)
-            else:
-                upload_dir = user_base
-            os.makedirs(upload_dir, exist_ok=True)
-            filepath = os.path.join(upload_dir, unique_filename)
-            file.save(filepath)
-            file_size = os.path.getsize(filepath)
-            conn.execute(
-                'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype) VALUES (?, ?, ?, ?, ?, ?)',
-                (filename, unique_filename, session['user_id'], folder_id, file_size, 
-                 mimetypes.guess_type(filename)[0] or 'application/octet-stream')
-            )
-        logger.info(f"Upload επιτυχές - {filename}")
-        return jsonify({'success': True})
+            except ValueError:
+                return jsonify({'error': 'Invalid folder ID'}), 400
+        if rel_path:
+            upload_dir = os.path.join(user_base, rel_path)
+        else:
+            upload_dir = user_base
+        os.makedirs(upload_dir, exist_ok=True)
+        filepath = os.path.join(upload_dir, unique_filename)
+        file_part.save(filepath)
+        file_size = os.path.getsize(filepath)
+        conn.execute(
+            'INSERT INTO files (original_name, stored_name, user_id, folder_id, size, mimetype) VALUES (?, ?, ?, ?, ?, ?)',
+            (filename, unique_filename, session['user_id'], folder_id_int, file_size, 
+             mimetypes.guess_type(filename)[0] or 'application/octet-stream')
+        )
+    logger.info(f"Upload επιτυχές - {filename}")
+    return jsonify({'success': True, 'assembled': True})
 
 @app.route('/download/<int:file_id>')
 def download_file(file_id):
