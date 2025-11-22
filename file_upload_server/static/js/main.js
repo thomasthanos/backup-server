@@ -471,40 +471,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
-// Event delegation για τα κουμπιά makeFolderPublic
-document.addEventListener('DOMContentLoaded', function () {
-    document.body.addEventListener('click', function (e) {
-        if (e.target.closest('.btn-make-folder-public')) {
-            const folderId = e.target.closest('.btn-make-folder-public').getAttribute('data-folder-id');
-            if (folderId) {
-                makeFolderPublic(folderId);
-            }
-        }
-    });
-});
-/**
- * Make a folder public (admin only)
- * @param {string} folderId - The ID of the folder to make public
- */
-function makeFolderPublic(folderId) {
-    showConfirm('Are you sure you want to make this folder public? All users will be able to see it.', () => {
-        fetch(`/make_folder_public/${folderId}`, {
-            method: 'POST'
-        })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    window.location.reload();
-                } else {
-                    showAlert('Failed: ' + (data.error || 'Unknown error'));
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showAlert('Failed to make folder public');
-            });
-    });
-}
 
 //
 // Public toggle handler
@@ -539,3 +505,43 @@ function makePublic(fileId) {
             });
     });
 }
+
+/**
+ * Make a folder public (admin only)
+ * @param {string} folderId - The ID of the folder to make public
+ */
+function makeFolderPublic(folderId) {
+    console.log('makeFolderPublic called with:', folderId);
+
+    // Use our custom confirm modal to ask the admin for confirmation
+    showConfirm('Are you sure you want to make this folder public? All users will be able to see it and access its contents.', () => {
+        fetch(`/make_folder_public/${folderId}`, {
+            method: 'POST'
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    // The folder was successfully marked as public. Refresh the page
+                    // so the user can see the updated status.
+                    window.location.reload();
+                } else {
+                    // Display any error returned by the server
+                    const errorMsg = data.error || 'Failed to update folder';
+                    showAlert(errorMsg);
+                }
+            })
+            .catch(error => {
+                console.error('Error making folder public:', error);
+                showAlert('Failed to make folder public. Please try again.');
+            });
+    });
+}
+
+// Debug info
+console.log('main.js loaded successfully');
+console.log('makeFolderPublic function available:', typeof makeFolderPublic);

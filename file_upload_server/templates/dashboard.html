@@ -108,7 +108,15 @@
                             {% endif %}
                         </div>
                         <div class="col-size">
-                            <!-- υπάρχων κώδικας -->
+                            {% if folder.size >= 1024 * 1024 * 1024 %}
+                                {{ (folder.size / 1024 / 1024 / 1024) | round(2) }} GB
+                            {% elif folder.size >= 1024 * 1024 %}
+                                {{ (folder.size / 1024 / 1024) | round(2) }} MB
+                            {% elif folder.size >= 1024 %}
+                                {{ (folder.size / 1024) | round(2) }} KB
+                            {% else %}
+                                {{ folder.size }} B
+                            {% endif %}
                         </div>
                         <div class="col-date">{{ folder.created.split(' ')[0] }}</div>
                         <div class="col-actions">
@@ -117,7 +125,7 @@
                                 <span class="action-text">Open</span>
                             </a>
                             {% if is_admin and not folder.is_public %}
-                            <button class="btn-make-folder-public" data-folder-id="{{ folder.id }}">
+                            <button onclick="makeFolderPublic('{{ folder.id }}')" class="btn-make-public">
                                 <span class="action-icon">🌍</span>
                                 <span class="action-text">Make Public</span>
                             </button>
@@ -246,21 +254,59 @@
     </div>
 
     <script>
-        // Pass the current folder's ID to JavaScript
+        // Pass the current folder's ID to JavaScript in a way that doesn't confuse linters or TypeScript.
+        // We render the ID as a string via Jinja and then parse it in JavaScript. If there is no current
+        // folder, the string will be empty and we fall back to null.
         const currentFolderId = (() => {
             const idStr = "{{ current_folder.id if current_folder else '' }}";
             return idStr ? parseInt(idStr) : null;
         })();
         
-        // Προσθήκη debug information
-        console.log('Dashboard loaded successfully');
-        console.log('makeFolderPublic function defined:', typeof makeFolderPublic);
+        // Backup makeFolderPublic function to ensure it's always available
+        function makeFolderPublic(folderId) {
+            if (typeof showConfirm === 'function') {
+                showConfirm('Are you sure you want to make this folder public? All users will be able to see it.', () => {
+                    fetch(`/make_folder_public/${folderId}`, {
+                        method: 'POST'
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            window.location.reload();
+                        } else {
+                            const errorMsg = data.error || 'Failed to update folder';
+                            alert('Error: ' + errorMsg);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Failed to make folder public');
+                    });
+                });
+            } else {
+                // Fallback if modal functions aren't available
+                if (confirm('Make this folder public?')) {
+                    fetch(`/make_folder_public/${folderId}`, {
+                        method: 'POST'
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            window.location.reload();
+                        } else {
+                            alert('Failed: ' + (data.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Failed to make folder public');
+                    });
+                }
+            }
+        }
+        
+        console.log('Dashboard loaded - makeFolderPublic available:', typeof makeFolderPublic);
     </script>
-    <script>
-    // Clear cache και φόρτωση script
-    const script = document.createElement('script');
-    script.src = "{{ url_for('static', filename='js/main.js') }}?v=" + Date.now();
-    document.body.appendChild(script);
-</script>
+    <script src="{{ url_for('static', filename='js/main.js') }}?v=2.0"></script>
 </body>
 </html>
