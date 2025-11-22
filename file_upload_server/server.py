@@ -20,35 +20,17 @@ app = Flask(__name__)
 app.secret_key = 'a1b2c3d4e5f6g7h8i9j0'
 app.config['UPLOAD_FOLDER'] = 'uploads'
 app.config['MAX_CONTENT_LENGTH'] = None
-
-# Temporary folder for storing chunked upload parts. When a large file is
-# uploaded in pieces (to work around upstream request/response limits),
-# each part will be stored in a subdirectory under this folder using a
-# unique identifier. Once all parts arrive, they will be assembled into
-# a single file and this temporary folder will be cleaned up.  This
-# directory lives alongside the main upload folder.
 app.config['CHUNK_TEMP_FOLDER'] = os.path.join(app.config['UPLOAD_FOLDER'], 'temp_chunks')
 app.config['DATABASE'] = 'data/fileserver.db'
 
-# Define an admin user ID.  In this simplified example the user with ID 1
-# is considered the administrator.  The admin has the ability to mark
-# uploads as public so that all users can view and download them.
-# The original implementation used ADMIN_ID to indicate which user is the
-# administrator.  To provide a more robust mechanism you can also specify
-# an ADMIN_EMAIL; if a user's email matches this value they will be treated
-# as admin regardless of ID.  You can leave ADMIN_EMAIL unset (None) to
-# disable email-based admin selection.
 ADMIN_ID = 1
-ADMIN_EMAIL = os.environ.get('FILESERVER_ADMIN_EMAIL')  # override via environment if desired
+ADMIN_EMAIL = os.environ.get('FILESERVER_ADMIN_EMAIL')
 
 app.config['SMTP_SERVER'] = 'smtp.gmail.com'
 app.config['SMTP_PORT'] = 587
 app.config['SMTP_USERNAME'] = 'plussd090@gmail.com'
 app.config['SMTP_PASSWORD'] = 'ncchuzjbkkgidnih'
-# Base URL used in emails and tokens. When deploying in production, set the
-# FILESERVER_BASE_URL environment variable to your public domain (e.g.,
-# 'https://thomast.uk'). Defaults to localhost for development.
-app.config['BASE_URL'] = os.environ.get('https://thomast.uk', 'http://localhost:5000')
+app.config['BASE_URL'] = 'https://thomast.uk'
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger()
@@ -96,9 +78,6 @@ def init_db():
                 FOREIGN KEY (parent_id) REFERENCES folders(id)
             );
             
-            -- Added an is_public column to the files table.  This flag
-            -- determines whether a file is visible to all users (1) or only
-            -- to its owner (0).  Older databases will be migrated below.
             CREATE TABLE IF NOT EXISTS files (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 original_name TEXT NOT NULL,
@@ -130,7 +109,6 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_tokens_token ON tokens(token);
             CREATE INDEX IF NOT EXISTS idx_tokens_user_type ON tokens(user_id, token_type);
         ''')
-        # If the is_public column does not exist (e.g. in older databases), add it.
         try:
             cols = [row[1] for row in conn.execute('PRAGMA table_info(files)').fetchall()]
             if 'is_public' not in cols:
@@ -141,14 +119,6 @@ def init_db():
 init_db()
 
 def ensure_user_folder(user_id, conn):
-    """
-    Ensure that the physical upload directory for a user exists. This helper
-    is called after a user has successfully verified their email so that
-    directories are created only for confirmed accounts. It fetches the
-    user's name, sanitizes it for filesystem use, constructs the folder
-    name (e.g. "username_1" or "user_1"), and creates the directory if
-    it doesn't already exist. Returns the full path to the user's folder.
-    """
     user = conn.execute('SELECT id, name FROM users WHERE id = ?', (user_id,)).fetchone()
     if not user:
         return None
@@ -158,7 +128,6 @@ def ensure_user_folder(user_id, conn):
     else:
         user_folder_name = f"user_{user['id']}"
     user_folder_path = os.path.join(app.config['UPLOAD_FOLDER'], user_folder_name)
-    # Create the directory only if it does not exist
     os.makedirs(user_folder_path, exist_ok=True)
     return user_folder_path
 
@@ -167,40 +136,22 @@ def render_email_template(template_name, **context):
     return render_template('emails/base_email.html', content=template_content)
 
 def send_email(to_email, subject, body):
-    """
-    Send an email with both HTML and plain‑text alternatives.
-
-    Many email clients will prefer the plain‑text part if present,
-    especially when HTML is stripped or disabled. To ensure that
-    our branding (e.g. "FileCloud Pro") and core message appear
-    even in plain mode, we generate a simple plain‑text version
-    by removing HTML tags from the rendered template and prefixing
-    the company name. The email is sent using a multipart/alternative
-    container so clients can choose the best representation.
-    """
     try:
-        # Create the root message as an alternative container.
         msg = MIMEMultipart('alternative')
         msg['From'] = f"FileCloud Pro <{app.config['SMTP_USERNAME']}>"
         msg['To'] = to_email
         msg['Subject'] = subject
 
-        # Generate a naive plain‑text fallback by stripping HTML tags.
-        # Prepend the service name so it appears in plain clients.
         try:
-            # Remove HTML tags and collapse whitespace
             plain_body = re.sub('<[^<]+?>', '', body)
             plain_body = re.sub('\s+\n', '\n', plain_body).strip()
         except Exception:
-            # Fallback to raw body if stripping fails
             plain_body = body
         plain_body = f"FileCloud Pro\n\n{plain_body}"
 
-        # Attach the plain and HTML parts
         msg.attach(MIMEText(plain_body, 'plain'))
         msg.attach(MIMEText(body, 'html'))
 
-        # Send the email via the configured SMTP server
         server = smtplib.SMTP(app.config['SMTP_SERVER'], app.config['SMTP_PORT'])
         server.starttls()
         server.login(app.config['SMTP_USERNAME'], app.config['SMTP_PASSWORD'])
@@ -208,7 +159,6 @@ def send_email(to_email, subject, body):
         server.quit()
         return True
     except Exception as e:
-        # Log the exception to aid debugging
         print(f"Σφάλμα αποστολής email: {e}")
         return False
 
@@ -368,10 +318,6 @@ def register():
                     (email, generate_password_hash(password), name))
         
         user = conn.execute('SELECT id, name FROM users WHERE email = ?', (email,)).fetchone()
-        # We no longer create the user's upload folder at registration time.
-        # The folder will be created lazily after the user verifies their email
-        # via the ensure_user_folder() helper. This prevents lingering
-        # directories for unverified accounts.
         
         code = create_code(user['id'], 'email_code', expires_minutes=5, conn=conn)
         
@@ -405,7 +351,6 @@ def verify_email(token):
     if token_data:
         with get_db() as conn:
             conn.execute('UPDATE users SET email_verified = 1 WHERE id = ?', (token_data['user_id'],))
-            # Create the user's upload folder now that email is verified
             ensure_user_folder(token_data['user_id'], conn)
         
         flash('Email verified successfully! You can now use all features.', 'success')
@@ -430,7 +375,6 @@ def verify_code():
                 return render_template('verify-code.html')
             conn.execute('UPDATE tokens SET used = 1 WHERE id = ?', (token_data['id'],))
             conn.execute('UPDATE users SET email_verified = 1 WHERE id = ?', (session['user_id'],))
-            # Lazily create the user's upload folder now that they are verified
             ensure_user_folder(session['user_id'], conn)
         flash('Email verified successfully! You can now use all features.', 'success')
         return redirect(url_for('dashboard'))
@@ -462,38 +406,25 @@ def resend_verification():
 
 @app.route('/request_password_reset', methods=['GET', 'POST'])
 def request_password_reset():
-    """
-    Handle requests to initiate a password reset. A user must provide their
-    email address. If the account exists and the email has been verified, a
-    password reset link is sent. If the email exists but has not yet been
-    verified, a new verification code is generated and emailed, and the user
-    is directed to the verification page. This prevents unverified accounts
-    from resetting their passwords until they complete email verification.
-    """
     if request.method == 'POST':
         email = request.form.get('email')
-        # Normalize email to lowercase if present
         if email:
             email = email.strip().lower()
         with get_db() as conn:
             user = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
             if user:
-                # If the email has not been verified, prompt the user to verify
                 if not user['email_verified']:
-                    # Generate a new verification code and send it
                     code = create_code(user['id'], 'email_code', expires_minutes=5, conn=conn)
                     email_body = render_email_template(
                         'verification_code.html',
                         verification_code=code
                     )
                     send_email(email, "Email Verification Code - FileCloud Pro", email_body)
-                    # Set session so the verification page knows which user is verifying
                     session['user_id'] = user['id']
                     session['user_email'] = user['email']
                     flash('You must verify your email before resetting your password. A verification code has been sent.', 'error')
                     return redirect(url_for('verify_code'))
                 else:
-                    # Generate a password reset token valid for 1 hour
                     token = create_token(user['id'], 'password_reset', expires_hours=1, conn=conn)
                     reset_url = f"{app.config['BASE_URL']}/reset_password/{token}"
                     email_body = render_email_template(
@@ -505,10 +436,8 @@ def request_password_reset():
                     else:
                         flash('Error sending reset email. Please try again later.', 'error')
             else:
-                # Do not reveal whether the email exists for security reasons
                 flash('If an account with that email exists and is verified, a password reset link has been sent.', 'success')
         return redirect(url_for('signin'))
-    # GET request: show the request password reset form
     return render_template('request-password-reset.html')
 
 @app.route('/reset_password/<token>', methods=['GET', 'POST'])
@@ -601,9 +530,6 @@ def dashboard(folder_id=None):
             folder_dict['size'] = size_row['total'] or 0
             folders.append(folder_dict)
         
-        # Select files for the current view.  When at the root folder (folder_id is None),
-        # include any public files (is_public = 1) that live in the root (folder_id IS NULL).
-        # Otherwise, only list files owned by the current user within the given folder.
         if folder_id is None:
             file_rows = conn.execute(
                 'SELECT * FROM files WHERE ((user_id = ? AND folder_id IS NULL) OR (is_public = 1 AND folder_id IS NULL)) ORDER BY uploaded DESC',
@@ -640,8 +566,6 @@ def dashboard(folder_id=None):
                 continue
             files.append(file_dict)
     
-    # Determine if the current user is the admin.  A user is admin if their
-    # id matches ADMIN_ID or their email matches ADMIN_EMAIL.
     is_admin = False
     if session.get('user_id') == ADMIN_ID:
         is_admin = True
@@ -709,18 +633,10 @@ def upload_file():
         logger.info("Upload αποτυχία - Μη συνδεδεμένος")
         return jsonify({'error': 'Not authenticated'}), 401
     
-    # Ensure a file is provided in the request. Even for chunked uploads,
-    # the part is expected to be sent as a file field.
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'}), 400
 
     file_part = request.files['file']
-    # Distinguish between normal uploads and chunked uploads. For chunked
-    # uploads, the client must provide the following fields in the form
-    # data: 'chunk_index', 'total_chunks', 'file_name', and 'upload_id'.
-    # Optionally, it can provide 'folder_id' to indicate the folder to
-    # store the final assembled file.  The chunk_index should be
-    # zero‑based and total_chunks is the total number of parts.
     if request.form.get('chunk_index') is not None and request.form.get('total_chunks') is not None and request.form.get('file_name') and request.form.get('upload_id'):
         try:
             chunk_index = int(request.form['chunk_index'])
@@ -728,7 +644,6 @@ def upload_file():
         except ValueError:
             return jsonify({'error': 'Invalid chunk indices'}), 400
 
-        # Validate indices
         if chunk_index < 0 or total_chunks <= 0 or chunk_index >= total_chunks:
             return jsonify({'error': 'Invalid chunk indices'}), 400
         original_filename = secure_filename(request.form['file_name'])
@@ -740,22 +655,17 @@ def upload_file():
                 folder_id_val = int(folder_id_raw)
             except ValueError:
                 return jsonify({'error': 'Invalid folder ID'}), 400
-        # Create the temporary directory for this upload ID
         temp_dir = os.path.join(app.config['CHUNK_TEMP_FOLDER'], f"{session['user_id']}_{upload_id}")
         os.makedirs(temp_dir, exist_ok=True)
-        # Save the current chunk
         part_path = os.path.join(temp_dir, f"part_{chunk_index:06d}")
         file_part.save(part_path)
-        # If this is the last chunk, assemble the file
         if chunk_index == total_chunks - 1:
-            # Ensure that all parts are present
             part_files = []
             for i in range(total_chunks):
                 expected_path = os.path.join(temp_dir, f"part_{i:06d}")
                 if not os.path.exists(expected_path):
                     return jsonify({'error': 'Missing chunks for assembly'}), 400
                 part_files.append(expected_path)
-            # Determine the user's base upload directory
             with get_db() as conn:
                 user_base = get_user_base_path(conn, session['user_id'])
                 rel_path = ''
@@ -769,7 +679,6 @@ def upload_file():
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 unique_filename = f"{timestamp}_{original_filename}"
                 final_path = os.path.join(final_dir, unique_filename)
-                # Assemble the final file by concatenating chunks
                 with open(final_path, 'wb') as outfile:
                     total_size = 0
                     for part_file in sorted(part_files):
@@ -777,7 +686,6 @@ def upload_file():
                             data = infile.read()
                             outfile.write(data)
                             total_size += len(data)
-                # Remove temporary parts and directory
                 for part_file in part_files:
                     try:
                         os.remove(part_file)
@@ -787,19 +695,13 @@ def upload_file():
                     os.rmdir(temp_dir)
                 except OSError:
                     pass
-                # Insert file record into the database
-                # Determine whether this file should be public.  Only admins can set this flag.
-                # Determine whether this file should be public.  Only admins can set this flag.
                 is_public_val = 0
-                # Determine admin status based on ID or email
                 is_admin_user = False
                 if session.get('user_id') == ADMIN_ID:
                     is_admin_user = True
                 if ADMIN_EMAIL and session.get('user_email') == ADMIN_EMAIL:
                     is_admin_user = True
                 if is_admin_user:
-                    # Accept either "public" or "is_public" form fields.  Any truthy
-                    # string ("1", "true", etc.) will mark the file as public.
                     pub_flag = request.form.get('public') or request.form.get('is_public') or ''
                     if str(pub_flag).lower() in ['1', 'true', 'yes', 'on']:
                         is_public_val = 1
@@ -810,16 +712,12 @@ def upload_file():
             logger.info(f"Chunked upload assembled - {original_filename}")
             return jsonify({'success': True, 'assembled': True})
         else:
-            # Not the last chunk, return partial success
             return jsonify({'success': True, 'assembled': False})
 
-    # Fallback: handle normal (non‑chunked) uploads
     folder_id = request.form.get('folder_id')
-    # Extract original filename (it may be blank if not provided)
     filename = secure_filename(file_part.filename)
     if filename == '':
         return jsonify({'error': 'No selected file'}), 400
-    # Build a unique file name to avoid collisions
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     unique_filename = f"{timestamp}_{filename}"
     with get_db() as conn:
@@ -840,8 +738,6 @@ def upload_file():
         filepath = os.path.join(upload_dir, unique_filename)
         file_part.save(filepath)
         file_size = os.path.getsize(filepath)
-        # Determine if the file should be public.  Only admins can set public
-        # files.  Accept either "public" or "is_public" fields from the form.
         is_public_val = 0
         is_admin_user = False
         if session.get('user_id') == ADMIN_ID:
@@ -866,7 +762,6 @@ def download_file(file_id):
         return redirect(url_for('signin'))
     
     with get_db() as conn:
-        # Allow download if the file belongs to the current user or is public
         file_info = conn.execute(
             'SELECT * FROM files WHERE id = ? AND (user_id = ? OR is_public = 1)',
             (file_id, session['user_id'])
@@ -906,7 +801,6 @@ def serve_file(file_id):
     if 'user_id' not in session:
         return redirect(url_for('signin'))
     with get_db() as conn:
-        # Allow serving the file if the current user is the owner or the file is public
         file_info = conn.execute(
             'SELECT * FROM files WHERE id = ? AND (user_id = ? OR is_public = 1)',
             (file_id, session['user_id'])
@@ -947,7 +841,6 @@ def view_file(file_id):
     if 'user_id' not in session:
         return redirect(url_for('signin'))
     with get_db() as conn:
-        # Allow viewing if the file belongs to the current user or is public
         file_info = conn.execute(
             'SELECT * FROM files WHERE id = ? AND (user_id = ? OR is_public = 1)',
             (file_id, session['user_id'])
@@ -973,13 +866,8 @@ def view_file(file_id):
 
 @app.route('/make_public/<int:file_id>', methods=['POST'])
 def make_public(file_id):
-    """
-    Endpoint for the administrator to mark a file as public.  Only users
-    identified as admins via ADMIN_ID or ADMIN_EMAIL may perform this action.
-    """
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
-    # Determine if current user is admin
     is_admin_user = False
     if session.get('user_id') == ADMIN_ID:
         is_admin_user = True
@@ -988,7 +876,6 @@ def make_public(file_id):
     if not is_admin_user:
         return jsonify({'error': 'Not authorized'}), 403
     with get_db() as conn:
-        # Ensure the file exists
         file_info = conn.execute('SELECT * FROM files WHERE id = ?', (file_id,)).fetchone()
         if not file_info:
             return jsonify({'error': 'File not found'}), 404
