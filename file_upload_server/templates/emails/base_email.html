@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ subject }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; line-height: 1.6; color: #333; }
+        .email-container { max-width: 600px; margin: 0 auto; background: #ffffff; }
+        .email-header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; }
+        .email-logo { color: white; font-size: 24px; font-weight: bold; }
+        .email-body { padding: 40px 30px; }
+        .email-footer { background: #f8f9fa; padding: 20px; text-align: center; font-size: 14px; color: #666; }
+        .button { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                 color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; 
+                 font-weight: 600; margin: 20px 0; }
+        .code-display { background: #f8f9fa; border: 2px dashed #dee2e6; padding: 20px; 
+                       text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 8px; 
+                       color: #495057; margin: 20px 0; border-radius: 8px; }
+        .divider { height: 1px; background: linear-gradient(90deg, transparent, #dee2e6, transparent); margin: 30px 0; }
+    </style>
+</head>
+<body>
+    <div class="email-container">
+        {#
+            Insert the email-specific content here. We mark it as
+            "safe" so that nested HTML isn't escaped. Without the
+            |safe filter, Jinja2 will escape tags (e.g. <div> becomes
+            &lt;div&gt;), causing the email to render as plain text
+            instead of using the intended styles and structure. See
+            https://jinja.palletsprojects.com/en/latest/templates/#jinja-filters.safe
+        #}
+        {{ content | safe }}
+    </div>
+</body>
+</html>
