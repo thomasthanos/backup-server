@@ -367,6 +367,13 @@ function createFolder() {
         formData.append('parent_id', currentFolderId);
     }
 
+        // If the administrator has selected the "public folder" toggle, include the public
+        // flag in the request.  The server will ignore this flag for non-admin users.
+        const publicFolderCheckbox = document.getElementById('publicFolderCheckbox');
+        if (publicFolderCheckbox && publicFolderCheckbox.checked) {
+            formData.append('public', '1');
+        }
+
     fetch('/create_folder', {
         method: 'POST',
         body: formData
@@ -503,5 +510,36 @@ function makePublic(fileId) {
             console.error('Error making file public:', error);
             showAlert('Failed to update file');
         });
-    });
-}
+        });
+    }
+
+    /**
+     * Mark a folder (and its subfolders/files) as public.  Only administrators have
+     * permission to perform this action on the server; the client simply sends a
+     * POST request to the /make_folder_public endpoint after confirming with the user.
+     * @param {number} folderId
+     */
+    function makeFolderPublic(folderId) {
+        // Prompt the admin for confirmation.  The message explains that the
+        // entire folder hierarchy will become public.
+        showConfirm('Are you sure you want to make this folder public? All files and subfolders will become public.', () => {
+            fetch(`/make_folder_public/${folderId}`, {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Reload to reflect the updated folder visibility and remove
+                    // the public button for this entry.
+                    window.location.reload();
+                } else {
+                    const errorMsg = data.error || 'Failed to update folder';
+                    showAlert(errorMsg);
+                }
+            })
+            .catch(error => {
+                console.error('Error making folder public:', error);
+                showAlert('Failed to update folder');
+            });
+        });
+    }
