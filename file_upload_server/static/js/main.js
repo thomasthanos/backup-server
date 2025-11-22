@@ -107,8 +107,29 @@ function handleFileUpload(file) {
 
     const MAX_CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk; safely below the 100 MB proxy limit
 
-    // Use chunked upload if the file exceeds our chunk size
+    // If the file qualifies for a chunked upload, we also check if there's
+    // an existing incomplete upload in localStorage. If found and it matches
+    // this file, resume from where we left off. This enables continued
+    // uploading after network interruptions or browser restarts as long as
+    // the user selects the same file again.
     if (file.size > MAX_CHUNK_SIZE) {
+        try {
+            const stateJson = localStorage.getItem('uploadState');
+            let state = null;
+            if (stateJson) {
+                state = JSON.parse(stateJson);
+            }
+            if (state && state.fileName === file.name && state.fileSize === file.size) {
+                // Prompt the user to resume the upload
+                showConfirm('An incomplete upload was detected for this file. Do you want to resume?', () => {
+                    uploadLargeFile(file, MAX_CHUNK_SIZE, state);
+                });
+                return;
+            }
+        } catch (e) {
+            console.warn('Error parsing upload state:', e);
+        }
+        // No saved state, start a new chunked upload
         uploadLargeFile(file, MAX_CHUNK_SIZE);
         return;
     }
@@ -131,13 +152,28 @@ function handleFileUpload(file) {
     progressContainer.style.display = 'block';
     progressFill.style.width = '0%';
     progressText.textContent = 'Uploading...';
+    // Record the start time for speed calculations
+    const startTime = Date.now();
     const xhr = new XMLHttpRequest();
     // Progress tracking
     xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
             const percentComplete = (e.loaded / e.total) * 100;
+            // Calculate upload speed in bytes per second
+            const elapsedSeconds = (Date.now() - startTime) / 1000;
+            // Guard against divide by zero if progress event fires immediately
+            const speedBps = elapsedSeconds > 0 ? e.loaded / elapsedSeconds : 0;
+            // Convert to human readable units (KB/s or MB/s)
+            let speedText;
+            if (speedBps > 1024 * 1024) {
+                speedText = (speedBps / (1024 * 1024)).toFixed(2) + ' MB/s';
+            } else if (speedBps > 1024) {
+                speedText = (speedBps / 1024).toFixed(2) + ' KB/s';
+            } else {
+                speedText = speedBps.toFixed(2) + ' B/s';
+            }
             progressFill.style.width = percentComplete + '%';
-            progressText.textContent = `Uploading: ${Math.round(percentComplete)}%`;
+            progressText.textContent = `Uploading: ${Math.round(percentComplete)}% \u2013 ${speedText}`;
         }
     });
     // Upload complete
@@ -175,18 +211,46 @@ function handleFileUpload(file) {
  * @param {File} file - The file to upload.
  * @param {number} chunkSize - The maximum size of each chunk in bytes.
  */
-function uploadLargeFile(file, chunkSize) {
-    const totalChunks = Math.ceil(file.size / chunkSize);
-    const uploadId = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-    let currentChunk = 0;
+function uploadLargeFile(file, chunkSize, resumeState = null) {
+    // Determine initial state. For resumed uploads we reuse the upload ID,
+    // starting chunk index and totalChunks recorded previously. Otherwise we
+    // generate a new upload ID and compute the total number of chunks.
+    const totalChunks = resumeState && resumeState.totalChunks ? resumeState.totalChunks : Math.ceil(file.size / chunkSize);
+    const uploadId = resumeState && resumeState.uploadId ? resumeState.uploadId : `${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    let currentChunk = resumeState && typeof resumeState.currentChunk === 'number' ? resumeState.currentChunk : 0;
     // Show progress bar for chunked uploads
     progressContainer.style.display = 'block';
     progressFill.style.width = '0%';
     progressText.textContent = 'Uploading...';
+    // Track start time to calculate upload speed across chunks
+    const startTime = Date.now();
+    // Maximum number of retries per chunk
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
+    // Save the upload state to localStorage to allow resuming. We update
+    // currentChunk after each successful chunk upload.
+    function saveState() {
+        const state = {
+            fileName: file.name,
+            fileSize: file.size,
+            uploadId: uploadId,
+            currentChunk: currentChunk,
+            totalChunks: totalChunks,
+            chunkSize: chunkSize
+        };
+        try {
+            localStorage.setItem('uploadState', JSON.stringify(state));
+        } catch (e) {
+            // If localStorage quota is exceeded or disabled, silently ignore
+            console.warn('Could not save upload state:', e);
+        }
+    }
     /**
      * Upload the next chunk. This function is called recursively until all
      * chunks have been sent. On completion of the final chunk, the page
-     * refreshes to show the newly uploaded file.
+     * refreshes to show the newly uploaded file. If a chunk fails, it will
+     * retry up to MAX_RETRIES times. State is persisted to localStorage
+     * between chunk uploads so that the upload can be resumed if necessary.
      */
     function uploadNextChunk() {
         const start = currentChunk * chunkSize;
@@ -210,17 +274,46 @@ function uploadLargeFile(file, chunkSize) {
         }
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/upload');
+        // Track per‑chunk progress to compute speed
+        xhr.upload.addEventListener('progress', (e) => {
+            if (e.lengthComputable) {
+                // Bytes uploaded so far across all chunks
+                const uploadedBytes = currentChunk * chunkSize + e.loaded;
+                const percent = (uploadedBytes / file.size) * 100;
+                const elapsedSeconds = (Date.now() - startTime) / 1000;
+                const speedBps = elapsedSeconds > 0 ? uploadedBytes / elapsedSeconds : 0;
+                let speedText;
+                if (speedBps > 1024 * 1024) {
+                    speedText = (speedBps / (1024 * 1024)).toFixed(2) + ' MB/s';
+                } else if (speedBps > 1024) {
+                    speedText = (speedBps / 1024).toFixed(2) + ' KB/s';
+                } else {
+                    speedText = speedBps.toFixed(2) + ' B/s';
+                }
+                progressFill.style.width = percent + '%';
+                progressText.textContent = `Uploading: ${Math.round(percent)}% \u2013 ${speedText}`;
+            }
+        });
         xhr.onload = function () {
             if (xhr.status === 200) {
+                retryCount = 0; // reset retry counter on success
                 currentChunk++;
+                // Persist state so we can resume later
+                saveState();
                 // Update progress based on chunks completed
                 const percent = (currentChunk / totalChunks) * 100;
                 progressFill.style.width = percent + '%';
+                // Only update text here if not updated by progress event
                 progressText.textContent = `Uploading: ${Math.round(percent)}%`;
                 if (currentChunk < totalChunks) {
                     uploadNextChunk();
                 } else {
-                    // All chunks uploaded, refresh page after brief delay
+                    // All chunks uploaded, remove saved state and refresh page after brief delay
+                    try {
+                        localStorage.removeItem('uploadState');
+                    } catch (e) {
+                        // ignore errors removing state
+                    }
                     progressText.textContent = 'Upload complete! Refreshing...';
                     progressFill.style.width = '100%';
                     setTimeout(() => {
@@ -228,16 +321,28 @@ function uploadLargeFile(file, chunkSize) {
                     }, 1000);
                 }
             } else {
-                progressText.textContent = 'Upload failed!';
-                progressFill.style.width = '0%';
-                showAlert('Upload failed. Please try again.');
-                progressContainer.style.display = 'none';
+                // On server error, attempt to retry the same chunk
+                if (retryCount < MAX_RETRIES) {
+                    retryCount++;
+                    setTimeout(uploadNextChunk, 1000);
+                } else {
+                    progressText.textContent = 'Upload failed!';
+                    progressFill.style.width = '0%';
+                    showAlert('Upload failed. Please try again.');
+                    progressContainer.style.display = 'none';
+                }
             }
         };
         xhr.onerror = function () {
-            progressText.textContent = 'Upload failed!';
-            showAlert('Upload failed. Please check your connection.');
-            progressContainer.style.display = 'none';
+            // On network error, attempt to retry the same chunk up to MAX_RETRIES
+            if (retryCount < MAX_RETRIES) {
+                retryCount++;
+                setTimeout(uploadNextChunk, 1000);
+            } else {
+                progressText.textContent = 'Upload failed!';
+                showAlert('Upload failed. Please check your connection.');
+                progressContainer.style.display = 'none';
+            }
         };
         xhr.send(formData);
     }
@@ -366,3 +471,37 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+//
+// Public toggle handler
+//
+// Administrators can mark a private file as public by clicking the 🌍 button
+// on the dashboard. This function uses a confirmation modal before sending
+// a POST request to /make_public/<file_id>. On success it reloads the page to
+// reflect the updated access control. Any server error will be surfaced to
+// the user through the alert modal.
+function makePublic(fileId) {
+    // Use our custom confirm modal to ask the admin for confirmation
+    showConfirm('Are you sure you want to make this file public?', () => {
+        fetch(`/make_public/${fileId}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // The file was successfully marked as public. Refresh the page
+                // so the user can see the updated status and remove the public
+                // button for this entry.
+                window.location.reload();
+            } else {
+                // Display any error returned by the server
+                const errorMsg = data.error || 'Failed to update file';
+                showAlert(errorMsg);
+            }
+        })
+        .catch(error => {
+            console.error('Error making file public:', error);
+            showAlert('Failed to update file');
+        });
+    });
+}
