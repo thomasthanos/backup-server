@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file, jsonify, Response 
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import os
@@ -857,42 +857,121 @@ def download_file(file_id):
 def serve_file(file_id):
     if 'user_id' not in session:
         return redirect(url_for('signin'))
+    
     with get_db() as conn:
         file_info = conn.execute(
             'SELECT * FROM files WHERE id = ? AND (user_id = ? OR is_public = 1)',
             (file_id, session['user_id'])
         ).fetchone()
+    
     if not file_info:
         flash('File not found', 'error')
         return redirect(url_for('dashboard'))
+    
+    # Βρείτε το φυσικό path
     with get_db() as _conn:
         user_base = get_user_base_path(_conn, file_info['user_id'])
+    
     rel_path_safe = ''
     rel_path_raw = ''
     if file_info['folder_id']:
         with get_db() as conn:
             rel_path_safe = get_folder_relative_path(conn, file_info['folder_id'])
             rel_path_raw = get_folder_relative_path_raw(conn, file_info['folder_id'])
+    
     candidate_paths = []
     if rel_path_raw:
         candidate_paths.append(os.path.abspath(os.path.join(user_base, rel_path_raw, file_info['stored_name'])))
     if rel_path_safe:
         candidate_paths.append(os.path.abspath(os.path.join(user_base, rel_path_safe, file_info['stored_name'])))
     candidate_paths.append(os.path.abspath(os.path.join(user_base, file_info['stored_name'])))
+    
     abs_path = None
     for p in candidate_paths:
         if os.path.isfile(p):
             abs_path = p
             break
+    
     if abs_path is None:
         flash('File not found on server', 'error')
         return redirect(url_for('dashboard'))
-    return send_file(
-        abs_path,
-        as_attachment=False,
-        mimetype=file_info['mimetype']
-    )
-
+    
+    # VIDEO STREAMING SUPPORT
+    file_size = os.path.getsize(abs_path)
+    range_header = request.headers.get('Range', None)
+    
+    # Check if it's a video file and range header is present
+    is_video_file = file_info['mimetype'].startswith('video/') if file_info['mimetype'] else False
+    
+    if range_header and is_video_file:
+        try:
+            # Parse range header
+            byte1, byte2 = 0, None
+            range_match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+            
+            if range_match:
+                groups = range_match.groups()
+                byte1 = int(groups[0]) if groups[0] else 0
+                if groups[1]:
+                    byte2 = int(groups[1])
+                else:
+                    byte2 = file_size - 1
+            else:
+                # Invalid range header, serve whole file
+                return send_file(abs_path, as_attachment=False, mimetype=file_info['mimetype'])
+            
+            # Ensure byte2 doesn't exceed file size
+            if byte2 >= file_size:
+                byte2 = file_size - 1
+            
+            length = byte2 - byte1 + 1
+            
+            def generate():
+                with open(abs_path, 'rb') as f:
+                    f.seek(byte1)
+                    remaining = length
+                    while remaining > 0:
+                        chunk_size = min(8192, remaining)  # 8KB chunks
+                        data = f.read(chunk_size)
+                        if not data:
+                            break
+                        remaining -= len(data)
+                        yield data
+            
+            resp = Response(
+                generate(),
+                206,  # Partial Content
+                mimetype=file_info['mimetype'],
+                direct_passthrough=True,
+            )
+            
+            resp.headers.add('Content-Range', f'bytes {byte1}-{byte2}/{file_size}')
+            resp.headers.add('Accept-Ranges', 'bytes')
+            resp.headers.add('Content-Length', str(length))
+            resp.headers.add('Cache-Control', 'no-cache')
+            
+            # Video-specific headers for better streaming
+            resp.headers.add('Content-Disposition', 'inline')
+            resp.headers.add('X-Content-Type-Options', 'nosniff')
+            
+            return resp
+            
+        except Exception as e:
+            print(f"Streaming error: {e}")
+            # Fallback to regular file serve
+            return send_file(abs_path, as_attachment=False, mimetype=file_info['mimetype'])
+    
+    else:
+        # Regular file serve for non-video files or without range header
+        resp = send_file(
+            abs_path,
+            as_attachment=False,
+            mimetype=file_info['mimetype'],
+            conditional=True
+        )
+        resp.headers.add('Accept-Ranges', 'bytes')
+        return resp
+    
 @app.route('/view/<int:file_id>')
 def view_file(file_id):
     if 'user_id' not in session:
