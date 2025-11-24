@@ -129,7 +129,6 @@ def ensure_user_folder(user_id, conn):
     user = conn.execute('SELECT id, name FROM users WHERE id = ?', (user_id,)).fetchone()
     if not user:
         return None
-    # ΚΡΑΤΑΜΕ secure_filename() ΓΙΑ USERNAMES
     sanitized_name = secure_filename(user['name']) if user['name'] else ''
     if sanitized_name:
         user_folder_name = f"{sanitized_name}_{user['id']}"
@@ -213,7 +212,6 @@ def get_folder_relative_path(conn, folder_id):
         folder = conn.execute('SELECT id, name, parent_id FROM folders WHERE id = ?', (current_id,)).fetchone()
         if not folder:
             break
-        # ΑΦΑΙΡΕΣΗ secure_filename() ΜΟΝΟ ΓΙΑ ΦΑΚΕΛΟΥΣ
         safe_name = folder['name']
         parts.insert(0, safe_name)
         current_id = folder['parent_id']
@@ -239,7 +237,7 @@ def get_user_base_path(conn, user_id):
     user = conn.execute('SELECT name FROM users WHERE id = ?', (user_id,)).fetchone()
     sanitized_name = None
     if user and user['name']:
-        sanitized_name = secure_filename(user['name'])  # ΚΡΑΤΑΜΕ ΓΙΑ USERNAMES
+        sanitized_name = secure_filename(user['name'])
     base_upload = app.config['UPLOAD_FOLDER']
     if sanitized_name:
         candidate_name = f"{sanitized_name}_{user_id}"
@@ -503,7 +501,6 @@ def dashboard(folder_id=None):
         breadcrumbs = []
         
         if folder_id:
-            # ΕΠΕΝΔΥΣΗ: Επιτρέψτε πρόσβαση σε δημόσιους φακέλους όλων των χρηστών
             current_folder = conn.execute(
                 'SELECT * FROM folders WHERE id = ? AND (user_id = ? OR is_public = 1)',
                 (folder_id, session['user_id'])
@@ -512,7 +509,6 @@ def dashboard(folder_id=None):
             if current_folder:
                 breadcrumbs = get_breadcrumbs(conn, folder_id)
         
-        # ΕΠΕΝΔΥΣΗ: Εμφάνιση όλων των δημόσιων φακέλων + προσωπικών φακέλων
         folder_rows = conn.execute(
             '''SELECT * FROM folders 
                WHERE (user_id = ? OR is_public = 1) 
@@ -521,19 +517,9 @@ def dashboard(folder_id=None):
             (session['user_id'], folder_id)
         ).fetchall()
         
-        # DEBUG: Log public folders
-        public_folders = conn.execute(
-            'SELECT id, name, user_id, is_public FROM folders WHERE is_public = 1'
-        ).fetchall()
-        
-        logger.info(f"DEBUG: Found {len(public_folders)} public folders:")
-        for folder in public_folders:
-            logger.info(f"DEBUG: Public Folder - ID: {folder['id']}, Name: {folder['name']}, Owner: {folder['user_id']}")
-        
         folders = []
         for row in folder_rows:
             folder_dict = dict(row)
-            # Χρησιμοποιήστε το user_id του ιδιοκτήτη του φακέλου
             folder_owner_id = folder_dict['user_id']
             user_base = get_user_base_path(conn, folder_owner_id)
             
@@ -552,11 +538,9 @@ def dashboard(folder_id=None):
                     physical_folder_path = safe_path
                     
             if physical_folder_path is None:
-                # Αν ο φάκελος δεν υπάρχει πια, διαγράψτε τον από τη βάση
                 conn.execute('DELETE FROM folders WHERE id = ?', (folder_dict['id'],))
                 continue
                 
-            # Υπολογισμός μεγέθους φακέλου
             size_row = conn.execute(
                 'SELECT SUM(size) as total FROM files WHERE folder_id = ?',
                 (folder_dict['id'],)
@@ -564,7 +548,6 @@ def dashboard(folder_id=None):
             folder_dict['size'] = size_row['total'] or 0
             folders.append(folder_dict)
         
-        # ΕΠΕΝΔΥΣΗ: Εμφάνιση αρχείων από δημόσιους φακέλους άλλων χρηστών
         if folder_id is None:
             file_rows = conn.execute(
                 '''SELECT * FROM files 
@@ -585,7 +568,6 @@ def dashboard(folder_id=None):
         files = []
         for row in file_rows:
             file_dict = dict(row)
-            # Χρησιμοποιήστε το user_id του ιδιοκτήτη του αρχείου
             file_owner_id = file_dict['user_id']
             user_base = get_user_base_path(conn, file_owner_id)
             
@@ -622,12 +604,6 @@ def dashboard(folder_id=None):
         is_admin = True
         
     current_user_id = session.get('user_id')
-    
-    # DEBUG: Log what we're sending to template
-    logger.info(f"DEBUG: Rendering dashboard for user {session['user_id']}")
-    logger.info(f"DEBUG: Folders count: {len(folders)}")
-    logger.info(f"DEBUG: Files count: {len(files)}")
-    logger.info(f"DEBUG: Is admin: {is_admin}")
     
     return render_template('dashboard.html', 
                          files=files, 
@@ -868,7 +844,6 @@ def serve_file(file_id):
         flash('File not found', 'error')
         return redirect(url_for('dashboard'))
     
-    # Βρείτε το φυσικό path
     with get_db() as _conn:
         user_base = get_user_base_path(_conn, file_info['user_id'])
     
@@ -896,16 +871,13 @@ def serve_file(file_id):
         flash('File not found on server', 'error')
         return redirect(url_for('dashboard'))
     
-    # VIDEO STREAMING SUPPORT
     file_size = os.path.getsize(abs_path)
     range_header = request.headers.get('Range', None)
     
-    # Check if it's a video file and range header is present
     is_video_file = file_info['mimetype'].startswith('video/') if file_info['mimetype'] else False
     
     if range_header and is_video_file:
         try:
-            # Parse range header
             byte1, byte2 = 0, None
             range_match = re.search(r'bytes=(\d+)-(\d*)', range_header)
             
@@ -917,10 +889,8 @@ def serve_file(file_id):
                 else:
                     byte2 = file_size - 1
             else:
-                # Invalid range header, serve whole file
                 return send_file(abs_path, as_attachment=False, mimetype=file_info['mimetype'])
             
-            # Ensure byte2 doesn't exceed file size
             if byte2 >= file_size:
                 byte2 = file_size - 1
             
@@ -931,7 +901,7 @@ def serve_file(file_id):
                     f.seek(byte1)
                     remaining = length
                     while remaining > 0:
-                        chunk_size = min(8192, remaining)  # 8KB chunks
+                        chunk_size = min(8192, remaining)
                         data = f.read(chunk_size)
                         if not data:
                             break
@@ -940,7 +910,7 @@ def serve_file(file_id):
             
             resp = Response(
                 generate(),
-                206,  # Partial Content
+                206,
                 mimetype=file_info['mimetype'],
                 direct_passthrough=True,
             )
@@ -950,7 +920,6 @@ def serve_file(file_id):
             resp.headers.add('Content-Length', str(length))
             resp.headers.add('Cache-Control', 'no-cache')
             
-            # Video-specific headers for better streaming
             resp.headers.add('Content-Disposition', 'inline')
             resp.headers.add('X-Content-Type-Options', 'nosniff')
             
@@ -958,11 +927,9 @@ def serve_file(file_id):
             
         except Exception as e:
             print(f"Streaming error: {e}")
-            # Fallback to regular file serve
             return send_file(abs_path, as_attachment=False, mimetype=file_info['mimetype'])
     
     else:
-        # Regular file serve for non-video files or without range header
         resp = send_file(
             abs_path,
             as_attachment=False,
@@ -1024,7 +991,6 @@ def make_folder_public(folder_id):
     if 'user_id' not in session:
         return jsonify({'error': 'Not authenticated'}), 401
         
-    # Μόνο ο admin μπορεί να κάνει φακέλους δημόσιους
     is_admin_user = False
     if session.get('user_id') == ADMIN_ID:
         is_admin_user = True
@@ -1040,10 +1006,6 @@ def make_folder_public(folder_id):
             return jsonify({'error': 'Folder not found'}), 404
             
         conn.execute('UPDATE folders SET is_public = 1 WHERE id = ?', (folder_id,))
-        
-        # DEBUG: Verify the update worked
-        updated_folder = conn.execute('SELECT * FROM folders WHERE id = ?', (folder_id,)).fetchone()
-        logger.info(f"DEBUG: Folder {folder_id} is_public after update: {updated_folder['is_public']}")
         
     logger.info(f"Folder marked as public - ID {folder_id}")
     return jsonify({'success': True})
@@ -1112,15 +1074,12 @@ def delete_folder(folder_id):
         if subfolders['count'] > 0:
             return jsonify({'error': 'Folder must be empty'}), 400
         
-        # ΠΡΟΣΘΗΚΗ: Βρείτε το φυσικό path του φακέλου ΠΡΙΝ τη διαγραφή από τη βάση
         user_base = get_user_base_path(conn, session['user_id'])
         rel_path_safe = get_folder_relative_path(conn, folder_id)
         rel_path_raw = get_folder_relative_path_raw(conn, folder_id)
         
-        # Διαγραφή από τη βάση
         conn.execute('DELETE FROM folders WHERE id = ?', (folder_id,))
         
-        # Διαγραφή φυσικού φακέλου
         candidate_dirs = []
         if rel_path_raw:
             candidate_dirs.append(os.path.join(user_base, rel_path_raw))
@@ -1131,13 +1090,11 @@ def delete_folder(folder_id):
         for d in candidate_dirs:
             if os.path.exists(d) and os.path.isdir(d):
                 try:
-                    # Προσπάθεια απλής διαγραφής φακέλου
                     os.rmdir(d)
                     logger.info(f"Φυσικός φάκελος διαγράφηκε: {d}")
                     deleted_physical = True
                     break
                 except OSError as e:
-                    # Αν ο φάκελος δεν είναι άδειος, χρησιμοποιήστε shutil
                     try:
                         import shutil
                         shutil.rmtree(d)
@@ -1195,16 +1152,8 @@ def check_email_verified():
                 return redirect(url_for('verify_pending'))
 
 if __name__ == '__main__':
-    print("=" * 40)
     print("File Server - Εκκίνηση...")
-    print("=" * 40)
     print(f"Διεύθυνση: {app.config['BASE_URL']}")
-    print(f"Φάκελος uploads: {app.config['UPLOAD_FOLDER']}")
-    print(f"Βάση δεδομένων: {app.config['DATABASE']}")
-    print("=" * 40)
-    print("ΣΗΜΑΝΤΙΚΟ: Ρυθμίστε τα SMTP credentials στο server.py")
-    print("για να λειτουργήσει το σύστημα επαλήθευσης email")
-    print("=" * 40)
     
     import warnings
     warnings.filterwarnings("ignore")
