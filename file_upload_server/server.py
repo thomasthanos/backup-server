@@ -151,7 +151,7 @@ def send_email(to_email, subject, body):
 
         try:
             plain_body = re.sub('<[^<]+?>', '', body)
-            plain_body = re.sub('\s+\n', '\n', plain_body).strip()
+            plain_body = re.sub(r'\s+\n', '\n', plain_body).strip()
         except Exception:
             plain_body = body
         plain_body = f"FileCloud Pro\n\n{plain_body}"
@@ -1150,6 +1150,7 @@ def check_email_verified():
             user = conn.execute('SELECT email_verified FROM users WHERE id = ?', (session['user_id'],)).fetchone()
             if user and not user['email_verified'] and request.endpoint != 'verify_pending':
                 return redirect(url_for('verify_pending'))
+
 
 if __name__ == '__main__':
     print("File Server - Εκκίνηση...")
